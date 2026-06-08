@@ -1,8 +1,6 @@
-# 📱 HanjaDic: On-Device Traditional Medicine Hanja Dictionary
+# 📱 한의학사전: 온디바이스 한의·중의 통합 한자 사전 앱
 
-온디바이스 한의·중의 통합 한자 사전 앱
-
-## Overview
+## 요약
 
 **HanjaDic**는 한의/중의 의료 문헌을 위한 온디바이스 통합 한자 사전 애플리케이션입니다.
 
@@ -15,7 +13,7 @@
 - 로컬 SQLite 기반으로 빠른 검색 (인터넷 불필요)
 - 간체/번체 자동 정규화
 
-## Architecture
+## 아키텍쳐
 
 ```
 [카메라 촬영 / 텍스트 입력]
@@ -27,14 +25,14 @@
    ➡️ 음/뜻, 본초/방제 기초 정보 즉시 출력
 ```
 
-## Core Components
+## 핵심 구성요소
 
-### 1. OCR Module (간체/번체 통합)
+### 1. OCR 모듈 (간체/번체 통합)
 - iOS: `Vision Framework`
 - Android: `Google ML Kit`
 - 간체자 ↔ 번체자 정규화로 DB 검색 정확도 향상
 
-### 2. Local SQLite Database (~40MB)
+### 2. 로컬 SQLite 데이타베이스 (~40MB)
 한방 의학 데이터를 DB화하여 오프라인 즉시 검색
 
 **포함 데이터:**
@@ -44,45 +42,28 @@
 - 상용 한자 사전: 기본 자전 데이터
 - 경혈/질병 정보
 
-## Development Stack
+## 개발 스택
 
-### Backend & Data Processing
+### 백앤드, 데이타 처리
 ```
 Python 3.x
 - SQLite: 로컬 데이터베이스
 - PyPDF, PaddleOCR: 문서 처리 및 OCR
 ```
 
-### Frontend
+### 프론트엔드
 - **iOS**: SwiftUI + Vision Framework
 - **Android**: Kotlin + ML Kit (예정)
 
-## Project Structure
+## 지금 시작하기
 
-```
-hanjadic/
-├── scripts/                          # 데이터 처리 스크립트
-│   ├── extract_dongeuibogam_v2.py   # 동의보감 데이터 추출
-│   ├── parse_pdf_to_json.py         # PDF → JSON 변환
-│   ├── load_formula.py              # 처방 데이터 로드
-│   ├── load_hanja_words.py          # 한자어 데이터 로드
-│   ├── load_acupoints_diseases.py   # 혈위/질병 데이터 로드
-│   └── ...
-├── ios/HanjaDic/                     # iOS 앱
-├── data/                             # 원본 데이터 파일
-├── requirements.txt                  # Python 의존성
-└── master-plan.md                    # 상세 개발 계획서
-```
-
-## Quick Start
-
-### Prerequisites
+### 준비해야할 것
 ```bash
 python 3.8+
 pip install -r requirements.txt
 ```
 
-### Running Data Processing Scripts
+### 데이타 처리 스크립트
 ```bash
 # 동의보감 데이터 추출
 python scripts/extract_dongeuibogam_v2.py
@@ -97,24 +78,11 @@ python scripts/load_hanja_words.py
 python scripts/load_acupoints_diseases.py
 ```
 
-## Roadmap
-
-- [x] 동의보감 등 의서 데이터 추출 파이프라인 구축
-- [x] 본초, 방제, 혈위/질병 데이터 수집 및 DB 로드
-- [x] 한자어 사전 데이터 통합
-- [ ] OCR 통합 및 간체/번체 정규화 완성
-- [ ] iOS 앱 완성 및 배포
-- [ ] Android 포팅
-
-## Key References
+## 참고
 
 - **Traditional Medicine Texts**: 동의보감, 경악전서, 상한론
 - **Data Sources**: 한국한의학연구원(KIOM), AI Hub, 국립국어원
 
-## License
+## 라이센스
 
 Copyright © 2026 Chester Kim. All rights reserved.
-
-## Contact
-
-개발자: Chester Kim
