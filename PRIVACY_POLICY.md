@@ -1,12 +1,12 @@
 # Privacy Policy
 
-**HanjaDic** (한의·중의 통합 한자 사전)
+**OrientalMedDic** (한의·중의 통합 한자 사전)
 
 Last updated: 2025-01-01
 
 ## Summary
 
-HanjaDic은 사용자의 개인정보를 수집하지 않습니다. 모든 데이터 처리는 사용자의 기기에서 로컬로 수행됩니다.
+OrientalMedDic은 사용자의 개인정보를 수집하지 않습니다. 모든 데이터 처리는 사용자의 기기에서 로컬로 수행됩니다.
 
 ## Data Collection
 

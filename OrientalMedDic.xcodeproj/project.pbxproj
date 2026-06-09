@@ -64,7 +64,7 @@
 				453118392FC5E76A00802EB2 /* OrientalMedDic */,
 			);
 			name = OrientalMedDic;
-			productName = HanjaDic;
+			productName = OrientalMedDic;
 			productReference = 453118372FC5E76A00802EB2 /* OrientalMedDic.app */;
 			productType = "com.apple.product-type.application";
 		};

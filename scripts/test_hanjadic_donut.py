@@ -1,5 +1,5 @@
 """
-Fine-tuned Donut-HanjaDic 모델 테스트
+Fine-tuned Donut-OrientalMedDic 모델 테스트
 """
 import torch
 from PIL import Image
@@ -43,7 +43,7 @@ def test(image_path):
     result = processor.batch_decode(outputs, skip_special_tokens=True)[0]
 
     print("\n" + "=" * 50)
-    print("Donut-HanjaDic Result:")
+    print("Donut-OrientalMedDic Result:")
     print("=" * 50)
     print(result if result.strip() else "[결과 없음]")
     print("=" * 50)

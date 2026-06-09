@@ -7,7 +7,7 @@ conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
 print("="*60)
-print("HanjaDic 데이터베이스 검색 테스트")
+print("OrientalMedDic 데이터베이스 검색 테스트")
 print("="*60)
 
 # 테스트 1: 단일 한자 검색

@@ -1,6 +1,6 @@
 //
-//  HanjaDicApp.swift
-//  HanjaDic
+//  OrientalMedDicApp.swift
+//  OrientalMedDic
 //
 //  Created by Kim, Chester on 5/26/26.
 //
@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct HanjaDicApp: App {
+struct OrientalMedDicApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
