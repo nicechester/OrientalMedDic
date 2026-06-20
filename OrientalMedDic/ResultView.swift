@@ -181,6 +181,8 @@ class ResultDetailViewModel: ObservableObject {
 
 extension String {
     var containsHangul: Bool {
-        return rangeOfCharacter(from: CharacterSet(charactersIn: "ㄱ-ㅎㅏ-ㅣ가-힣")) != nil
+        let result = rangeOfCharacter(from: CharacterSet(charactersIn: "ㄱ-ㅎㅏ-ㅣ가-힣")) != nil
+        print("[DEBUG] containsHangul: '\(self)' -> \(result)")
+        return result
     }
 }
