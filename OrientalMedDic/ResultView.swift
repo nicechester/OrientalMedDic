@@ -17,7 +17,7 @@ class ResultViewModel: ObservableObject {
 
     func lookupDB(text: String) {
         // Check if input contains Hangul
-        let containsHangul = text.rangeOfCharacter(from: .koreanLetters) != nil
+        let containsHangul = text.containsHangul
         
         if containsHangul {
             dbResults = db.lookupByReading(text: text)
@@ -176,5 +176,11 @@ class ResultDetailViewModel: ObservableObject {
 
     init(term: String) {
         self.results = DictionaryDB.shared.lookupAllSubstrings(text: term)
+    }
+}
+
+extension String {
+    var containsHangul: Bool {
+        return rangeOfCharacter(from: CharacterSet(charactersIn: "ㄱ-ㅎㅏ-ㅣ가-힣")) != nil
     }
 }
