@@ -8,11 +8,19 @@ struct TextInputView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
-                TextEditor(text: $inputText)
-                    .font(.title2)
-                    .frame(height: 150)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.3)))
-                    .padding(.horizontal)
+                ZStack {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+
+                    TextEditor(text: $inputText)
+                        .font(.title2)
+                        .frame(height: 150)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.3)))
+                        .padding(.horizontal)
+                }
 
                 if inputText.isEmpty {
                     Text("한자 또는 의서 문장을 입력하세요")
