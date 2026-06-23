@@ -845,6 +845,7 @@ class DictionaryDB {
         var stmt: OpaquePointer?
 
         let pattern = "%\(text)%"
+        print("[DictionaryDB] Executing SQL: \(sql) with pattern: \(pattern)")
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
             while sqlite3_step(stmt) == SQLITE_ROW {
