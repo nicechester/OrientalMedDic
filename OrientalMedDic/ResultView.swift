@@ -181,7 +181,10 @@ class ResultDetailViewModel: ObservableObject {
 
 extension String {
     var containsHangul: Bool {
-        let result = rangeOfCharacter(from: CharacterSet(charactersIn: "ㄱ-ㅎㅏ-ㅣ가-힣")) != nil
+        // Using a more robust way to check for Hangul characters
+        // This covers Hangul Syllables (AC00-D7AF) and Hangul Jamo (3130-318F)
+        let hangulCharacterSet = CharacterSet(charactersIn: "가-힣ㄱ-ㅎㅏ-ㅣ")
+        let result = rangeOfCharacter(from: hangulCharacterSet) != nil
         print("[DEBUG] containsHangul: '\(self)' -> \(result)")
         return result
     }
