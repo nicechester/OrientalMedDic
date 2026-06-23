@@ -16,7 +16,14 @@ class ResultViewModel: ObservableObject {
     private let db = DictionaryDB.shared
 
     func lookupDB(text: String) {
-        dbResults = db.lookupAllSubstrings(text: text)
+        // Check if input contains Hangul
+        let containsHangul = text.containsHangul
+        
+        if containsHangul {
+            dbResults = db.lookupByReading(text: text)
+        } else {
+            dbResults = db.lookupAllSubstrings(text: text)
+        }
     }
 }
 
@@ -169,5 +176,11 @@ class ResultDetailViewModel: ObservableObject {
 
     init(term: String) {
         self.results = DictionaryDB.shared.lookupAllSubstrings(text: term)
+    }
+}
+
+extension String {
+    var containsHangul: Bool {
+        return "\(self)".range(of: "\\p{Hangul}", options: .regularExpression) != nil
     }
 }

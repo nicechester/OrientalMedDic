@@ -681,4 +681,353 @@ class DictionaryDB {
         let converted = parts.map { romanMap[$0] ?? $0 }
         return converted.joined(separator: " ")
     }
+
+    /// 한국어 독음으로 검색 (한글 입력 시 사용)
+    func lookupByReading(text: String) -> [DBResult] {
+        guard db != nil else {
+            print("DB 연결 없음")
+            return []
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+
+        var results: [DBResult] = []
+        var seenTerms = Set<String>()
+
+        // 1. 낱글자 검색 (hangul_reading 또는 korean_reading 매칭)
+        let hanjaResults = lookupHanjaByReading(text: text)
+        print("[DictionaryDB] HanjaByReading count: \(hanjaResults.count)")
+        for result in hanjaResults {
+            if !seenTerms.contains(result.term) {
+                seenTerms.insert(result.term)
+                results.append(result)
+            }
+        }
+
+        // 2. 한자어 검색 (reading 매칭)
+        let hanjaWordResults = lookupHanjaWordByReading(text: text)
+        print("[DictionaryDB] HanjaWordByReading count: \(hanjaWordResults.count)")
+        for result in hanjaWordResults {
+            if !seenTerms.contains(result.term) {
+                seenTerms.insert(result.term)
+                results.append(result)
+            }
+        }
+
+        // 3. 본초 검색 (name_korean 매칭)
+        let herbalResults = lookupHerbalByReading(text: text)
+        print("[DictionaryDB] HerbalByReading count: \(herbalResults.count)")
+        for result in herbalResults {
+            if !seenTerms.contains(result.term) {
+                seenTerms.insert(result.term)
+                results.append(result)
+            }
+        }
+
+        // 4. 방제 검색 (name_korean 매칭)
+        let formulaResults = lookupFormulaByReading(text: text)
+        print("[DictionaryDB] FormulaByReading count: \(formulaResults.count)")
+        for result in formulaResults {
+            if !seenTerms.contains(result.term) {
+                seenTerms.insert(result.term)
+                results.append(result)
+            }
+        }
+
+        // 5. 경혈 검색 (name_korean 매칭)
+        let acupointResults = lookupAcupointByReading(text: text)
+        print("[DictionaryDB] AcupointByReading count: \(acupointResults.count)")
+        for result in acupointResults {
+            if !seenTerms.contains(result.term) {
+                seenTerms.insert(result.term)
+                results.append(result)
+            }
+        }
+
+        // 6. 병명 검색 (name_korean 매칭)
+        let diseaseResults = lookupDiseaseByReading(text: text)
+        print("[DictionaryDB] DiseaseByReading count: \(diseaseResults.count)")
+        for result in diseaseResults {
+            if !seenTerms.contains(result.term) {
+                seenTerms.insert(result.term)
+                results.append(result)
+            }
+        }
+
+        // 7. 증상 검색 (symptom_korean 매칭)
+        let symptomResults = lookupSymptomByReading(text: text)
+        print("[DictionaryDB] SymptomByReading count: \(symptomResults.count)")
+        for result in symptomResults {
+            if !seenTerms.contains(result.term) {
+                seenTerms.insert(result.term)
+                results.append(result)
+            }
+        }
+
+        // 정렬: 전체 매칭 > 한자어 > 다른 category(길이순) > 낱글자
+        let categoryOrder: [String: Int] = [
+            "한자어": 0,
+            "본초": 1,
+            "방제": 2,
+            "경혈": 3,
+            "증상": 4,
+            "병명": 5
+        ]
+
+        return results.sorted { a, b in
+            let aIsExactMatch = a.reading == text || a.term == text
+            let bIsExactMatch = b.reading == text || b.term == text
+            if aIsExactMatch != bIsExactMatch {
+                return aIsExactMatch // 정확한 전체 매칭이 먼저
+            }
+
+            let aCategory = a.category
+            let bCategory = b.category
+
+            // category 있는 것이 category 없는 것보다 먼저
+            if (aCategory != nil) != (bCategory != nil) {
+                return aCategory != nil
+            }
+
+            // 같은 category 그룹 내에서 순서 정렬
+            if aCategory != nil && bCategory != nil {
+                let aOrder = categoryOrder[aCategory!] ?? 99
+                let bOrder = categoryOrder[bCategory!] ?? 99
+                if aOrder != bOrder {
+                    return aOrder < bOrder
+                }
+
+                // 같은 category면 길이 순서 (긴 것부터)
+                if a.term.count != b.term.count {
+                    return a.term.count > b.term.count
+                }
+            }
+
+            return false // 같으면 원래 순서 유지
+        }
+    }
+
+    private func lookupHanjaByReading(text: String) -> [DBResult] {
+        var results: [DBResult] = []
+        let sql = "SELECT character, hangul_reading, korean_reading, definition_ko, definition FROM hanja WHERE hangul_reading LIKE ? OR korean_reading LIKE ?"
+        var stmt: OpaquePointer?
+
+        let pattern = "%\(text)%"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, (pattern as NSString).utf8String, -1, nil)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let character = String(cString: sqlite3_column_text(stmt, 0))
+                let hangulReading = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                let korean = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+                let defKo = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
+                let defEn = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? ""
+
+                let reading = !hangulReading.isEmpty ? hangulReading : Self.romanToHangul(korean.lowercased())
+                let description = !defKo.isEmpty ? defKo : defEn
+
+                if !reading.isEmpty {
+                    results.append(DBResult(
+                        term: character,
+                        reading: reading,
+                        category: nil,
+                        description: description
+                    ))
+                }
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
+
+    private func lookupHanjaWordByReading(text: String) -> [DBResult] {
+        var results: [DBResult] = []
+        let sql = "SELECT hanja, reading, meaning FROM hanja_word WHERE reading LIKE ? OR hanja LIKE ?"
+        var stmt: OpaquePointer?
+
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = "%\(trimmedText)%"
+        
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, (pattern as NSString).utf8String, -1, nil)
+            
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let hanja = String(cString: sqlite3_column_text(stmt, 0))
+                let reading = String(cString: sqlite3_column_text(stmt, 1))
+                let meaning = String(cString: sqlite3_column_text(stmt, 2))
+
+                results.append(DBResult(
+                    term: hanja,
+                    reading: reading,
+                    category: "한자어",
+                    description: meaning
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
+
+    private func lookupHerbalByReading(text: String) -> [DBResult] {
+        var results: [DBResult] = []
+        let sql = "SELECT name_hanja, name_korean, nature, flavor, meridian_tropism, efficacy FROM herbal WHERE name_korean LIKE ?"
+        var stmt: OpaquePointer?
+
+        let pattern = "%\(text)%"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let hanja = String(cString: sqlite3_column_text(stmt, 0))
+                let korean = String(cString: sqlite3_column_text(stmt, 1))
+                let nature = String(cString: sqlite3_column_text(stmt, 2))
+                let flavor = String(cString: sqlite3_column_text(stmt, 3))
+                let meridian = String(cString: sqlite3_column_text(stmt, 4))
+                let efficacy = String(cString: sqlite3_column_text(stmt, 5))
+
+                results.append(DBResult(
+                    term: hanja,
+                    reading: korean,
+                    category: "본초",
+                    description: "성미: \(nature)/\(flavor) | 귀경: \(meridian) | \(efficacy)"
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
+
+    private func lookupFormulaByReading(text: String) -> [DBResult] {
+        var results: [DBResult] = []
+        let sql = "SELECT name_hanja, name_korean, source_text, composition, indication FROM formula WHERE name_korean LIKE ?"
+        var stmt: OpaquePointer?
+
+        let pattern = "%\(text)%"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let hanja = String(cString: sqlite3_column_text(stmt, 0))
+                let korean = String(cString: sqlite3_column_text(stmt, 1))
+                let source = String(cString: sqlite3_column_text(stmt, 2))
+                let comp = String(cString: sqlite3_column_text(stmt, 3))
+                let indication = String(cString: sqlite3_column_text(stmt, 4))
+
+                results.append(DBResult(
+                    term: hanja,
+                    reading: korean,
+                    category: "방제",
+                    description: "[\(source)] \(comp) | 주치: \(indication)"
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
+
+    private func lookupAcupointByReading(text: String) -> [DBResult] {
+        var results: [DBResult] = []
+        let sql = "SELECT name_hanja, name_korean, meridian, code, properties, indication FROM acupuncture WHERE category='혈위' AND name_korean LIKE ?"
+        var stmt: OpaquePointer?
+
+        let pattern = "%\(text)%"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let hanja = String(cString: sqlite3_column_text(stmt, 0))
+                let korean = String(cString: sqlite3_column_text(stmt, 1))
+                let meridian = String(cString: sqlite3_column_text(stmt, 2))
+                let code = String(cString: sqlite3_column_text(stmt, 3))
+                let properties = String(cString: sqlite3_column_text(stmt, 4))
+                let indication = String(cString: sqlite3_column_text(stmt, 5))
+
+                results.append(DBResult(
+                    term: hanja,
+                    reading: "\(korean) (\(code))",
+                    category: "경혈",
+                    description: "\(meridian) | \(properties) | 주치: \(indication)"
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
+
+    private func lookupDiseaseByReading(text: String) -> [DBResult] {
+        var results: [DBResult] = []
+        let sql = "SELECT name_hanja, name_korean, symptoms FROM disease WHERE name_korean LIKE ?"
+        var stmt: OpaquePointer?
+
+        let pattern = "%\(text)%"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let hanja = String(cString: sqlite3_column_text(stmt, 0))
+                let korean = String(cString: sqlite3_column_text(stmt, 1))
+                let symptoms = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+
+                results.append(DBResult(
+                    term: hanja,
+                    reading: korean,
+                    category: "병명",
+                    description: symptoms
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
+
+    private func lookupSymptomByReading(text: String) -> [DBResult] {
+        var results: [DBResult] = []
+        let sql = "SELECT DISTINCT symptom_hanja, symptom_korean, category FROM symptom_formula WHERE symptom_korean LIKE ?"
+        var stmt: OpaquePointer?
+
+        let pattern = "%\(text)%"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let hanja = String(cString: sqlite3_column_text(stmt, 0))
+                let korean = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                let category = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+
+                // 관련 처방들 검색
+                var formulaList: [String] = []
+                let sqlFormulas = "SELECT DISTINCT formula_hanja, formula_korean FROM symptom_formula WHERE symptom_hanja = ? ORDER BY formula_hanja"
+                var stmtFormulas: OpaquePointer?
+                if sqlite3_prepare_v2(db, sqlFormulas, -1, &stmtFormulas, nil) == SQLITE_OK {
+                    sqlite3_bind_text(stmtFormulas, 1, (hanja as NSString).utf8String, -1, nil)
+                    while sqlite3_step(stmtFormulas) == SQLITE_ROW {
+                        let formulaHanja = sqlite3_column_text(stmtFormulas, 0).map { String(cString: $0) } ?? ""
+                        let formulaKorean = sqlite3_column_text(stmtFormulas, 1).map { String(cString: $0) } ?? ""
+                        if !formulaHanja.isEmpty {
+                            formulaList.append(formulaHanja)
+                        } else if !formulaKorean.isEmpty {
+                            formulaList.append(formulaKorean)
+                        }
+                    }
+                }
+                sqlite3_finalize(stmtFormulas)
+
+                if !formulaList.isEmpty {
+                    let description = "【증상의 처방】\n" + formulaList.prefix(10).joined(separator: ", ")
+                    + (formulaList.count > 10 ? " 외 \(formulaList.count - 10)개" : "")
+
+                    results.append(DBResult(
+                        term: hanja,
+                        reading: korean,
+                        category: "증상",
+                        description: description
+                    ))
+                } else {
+                    results.append(DBResult(
+                        term: hanja,
+                        reading: korean,
+                        category: "증상",
+                        description: ""
+                    ))
+                }
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
 }
