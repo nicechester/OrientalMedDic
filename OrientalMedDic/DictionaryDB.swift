@@ -695,6 +695,7 @@ class DictionaryDB {
 
         // 1. 낱글자 검색 (hangul_reading 또는 korean_reading 매칭)
         let hanjaResults = lookupHanjaByReading(text: text)
+        print("[DictionaryDB] HanjaByReading count: \(hanjaResults.count)")
         for result in hanjaResults {
             if !seenTerms.contains(result.term) {
                 seenTerms.insert(result.term)
@@ -704,6 +705,7 @@ class DictionaryDB {
 
         // 2. 한자어 검색 (reading 매칭)
         let hanjaWordResults = lookupHanjaWordByReading(text: text)
+        print("[DictionaryDB] HanjaWordByReading count: \(hanjaWordResults.count)")
         for result in hanjaWordResults {
             if !seenTerms.contains(result.term) {
                 seenTerms.insert(result.term)
@@ -713,6 +715,7 @@ class DictionaryDB {
 
         // 3. 본초 검색 (name_korean 매칭)
         let herbalResults = lookupHerbalByReading(text: text)
+        print("[DictionaryDB] HerbalByReading count: \(herbalResults.count)")
         for result in herbalResults {
             if !seenTerms.contains(result.term) {
                 seenTerms.insert(result.term)
@@ -722,6 +725,7 @@ class DictionaryDB {
 
         // 4. 방제 검색 (name_korean 매칭)
         let formulaResults = lookupFormulaByReading(text: text)
+        print("[DictionaryDB] FormulaByReading count: \(formulaResults.count)")
         for result in formulaResults {
             if !seenTerms.contains(result.term) {
                 seenTerms.insert(result.term)
@@ -731,6 +735,7 @@ class DictionaryDB {
 
         // 5. 경혈 검색 (name_korean 매칭)
         let acupointResults = lookupAcupointByReading(text: text)
+        print("[DictionaryDB] AcupointByReading count: \(acupointResults.count)")
         for result in acupointResults {
             if !seenTerms.contains(result.term) {
                 seenTerms.insert(result.term)
@@ -740,6 +745,7 @@ class DictionaryDB {
 
         // 6. 병명 검색 (name_korean 매칭)
         let diseaseResults = lookupDiseaseByReading(text: text)
+        print("[DictionaryDB] DiseaseByReading count: \(diseaseResults.count)")
         for result in diseaseResults {
             if !seenTerms.contains(result.term) {
                 seenTerms.insert(result.term)
@@ -749,6 +755,7 @@ class DictionaryDB {
 
         // 7. 증상 검색 (symptom_korean 매칭)
         let symptomResults = lookupSymptomByReading(text: text)
+        print("[DictionaryDB] SymptomByReading count: \(symptomResults.count)")
         for result in symptomResults {
             if !seenTerms.contains(result.term) {
                 seenTerms.insert(result.term)
