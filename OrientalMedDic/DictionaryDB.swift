@@ -841,13 +841,17 @@ class DictionaryDB {
 
     private func lookupHanjaWordByReading(text: String) -> [DBResult] {
         var results: [DBResult] = []
-        let sql = "SELECT hanja, reading, meaning FROM hanja_word WHERE reading LIKE ?"
+        let sql = "SELECT hanja, reading, meaning FROM hanja_word WHERE reading LIKE ? OR hanja LIKE ?"
         var stmt: OpaquePointer?
 
-        let pattern = "%\(text)%"
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = "%\(trimmedText)%"
         print("[DictionaryDB] Executing SQL: \(sql) with pattern: \(pattern)")
+        
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, (pattern as NSString).utf8String, -1, nil)
+            
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let hanja = String(cString: sqlite3_column_text(stmt, 0))
                 let reading = String(cString: sqlite3_column_text(stmt, 1))
