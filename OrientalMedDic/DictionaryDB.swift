@@ -846,9 +846,6 @@ class DictionaryDB {
 
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let pattern = "%\(trimmedText)%"
-        print("[DictionaryDB] Executing SQL: \(sql) with pattern: \(pattern)")
-        print("[DictionaryDB] Input text: '\(text)' (count: \(text.count))")
-        print("[DictionaryDB] Trimmed text: '\(trimmedText)' (count: \(trimmedText.count))")
         
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
