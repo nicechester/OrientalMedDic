@@ -710,14 +710,6 @@ class OverlayViewModel: NSObject, ObservableObject {
         return items
     }
 
-    private func normalizeOrientation(_ image: UIImage) -> UIImage {
-        guard image.imageOrientation != .up else { return image }
-        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
-        image.draw(in: CGRect(origin: .zero, size: image.size))
-        let normalized = UIGraphicsGetImageFromCurrentImageContext() ?? image
-        UIGraphicsEndImageContext()
-        return normalized
-    }
 }
 
 // MARK: - 비디오 프레임 → OCR
