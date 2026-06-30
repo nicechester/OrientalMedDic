@@ -503,7 +503,8 @@ class CameraViewModel: NSObject, ObservableObject {
             case .landscapeRight: 0
             case .landscapeLeft: 180
             case .portraitUpsideDown: 270
-            default: 90
+            case .portrait: 0
+            default: 0
             }
             if connection.isVideoRotationAngleSupported(angle) {
                 connection.videoRotationAngle = angle
