@@ -33,7 +33,8 @@ struct OverlayReadingView: View {
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $selectedItem) { item in
                 CharDetailSheet(item: item)
-                    .presentationDetents([.medium])
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
             .onChange(of: selectedPhoto) { _, item in
                 guard let item else { return }
@@ -282,14 +283,24 @@ struct CharDetailSheet: View {
         _viewModel = StateObject(wrappedValue: CharDetailViewModel(character: item.character))
     }
 
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 16) {
-                Text(item.character)
-                    .font(.system(size: 36))
-                Text(item.reading)
-                    .font(.title2)
-                    .foregroundStyle(.red)
+            HStack {
+                HStack(spacing: 16) {
+                    Text(item.character)
+                        .font(.system(size: 36))
+                    Text(item.reading)
+                        .font(.title2)
+                        .foregroundStyle(.red)
+                }
+                Spacer()
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.gray)
+                }
             }
 
             ScrollView {

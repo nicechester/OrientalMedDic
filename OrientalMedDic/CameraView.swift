@@ -3,6 +3,8 @@ import AVFoundation
 import Vision
 import Combine
 import PhotosUI
+import CoreMotion
+import os
 
 struct CameraView: View {
     @ObservedObject var viewModel: CameraViewModel
@@ -361,10 +363,16 @@ class CameraViewModel: NSObject, ObservableObject {
     @Published var recognizedText: String?
     @Published var capturedImage: UIImage?
     @Published var showResult = false
+    @Published var detectedLandscapeText = false
 
     let session = AVCaptureSession()
     private let output = AVCapturePhotoOutput()
+    private let videoOutput = AVCaptureVideoDataOutput()
     private var device: AVCaptureDevice?
+    private let motionManager = CMMotionManager()
+    private var deviceOrientation: UIDeviceOrientation = .portrait
+    private var textDetectionTimer: Timer?
+    private let textDetectionQueue = DispatchQueue(label: "textDetection", qos: .utility)
 
     func startSession() {
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
@@ -374,7 +382,14 @@ class CameraViewModel: NSObject, ObservableObject {
         session.beginConfiguration()
         if session.canAddInput(input) { session.addInput(input) }
         if session.canAddOutput(output) { session.addOutput(output) }
+        // Add video output for text orientation detection
+        videoOutput.setSampleBufferDelegate(self, queue: textDetectionQueue)
+        videoOutput.alwaysDiscardsLateVideoFrames = true
+        if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
         session.commitConfiguration()
+
+        startMotionUpdates()
+        startTextOrientationDetection()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.session.startRunning()
@@ -382,8 +397,91 @@ class CameraViewModel: NSObject, ObservableObject {
     }
 
     func stopSession() {
+        stopMotionUpdates()
+        textDetectionTimer?.invalidate()
+        textDetectionTimer = nil
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.session.stopRunning()
+        }
+    }
+
+    // MARK: - Motion-based orientation (reliable for photo capture)
+
+    private func startMotionUpdates() {
+        motionManager.accelerometerUpdateInterval = 0.2
+        motionManager.startAccelerometerUpdates(to: .main) { [weak self] data, _ in
+            guard let data = data else { return }
+            let x = data.acceleration.x
+            let y = data.acceleration.y
+            if abs(x) > abs(y) {
+                self?.deviceOrientation = x > 0 ? .landscapeRight : .landscapeLeft
+            } else {
+                self?.deviceOrientation = y > 0 ? .portraitUpsideDown : .portrait
+            }
+        }
+    }
+
+    private func stopMotionUpdates() {
+        motionManager.stopAccelerometerUpdates()
+    }
+
+    // MARK: - Text orientation detection
+
+    private let _shouldProcessFrame = OSAllocatedUnfairLock(initialState: false)
+
+    private func startTextOrientationDetection() {
+        textDetectionTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            self?._shouldProcessFrame.withLock { $0 = true }
+        }
+    }
+
+    nonisolated func detectTextOrientation(in sampleBuffer: CMSampleBuffer) {
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        let request = VNRecognizeTextRequest { [weak self] request, _ in
+            guard let results = request.results as? [VNRecognizedTextObservation], results.count >= 3 else { return }
+
+            // Check if text bounding boxes are wider than tall (landscape text in portrait frame)
+            var landscapeCount = 0
+            for obs in results.prefix(10) {
+                let box = obs.boundingBox
+                if box.width > box.height * 2.0 {
+                    landscapeCount += 1
+                }
+            }
+
+            let isLandscapeText = landscapeCount > results.prefix(10).count / 2
+
+            Task { @MainActor in
+                guard let self = self else { return }
+                if self.detectedLandscapeText != isLandscapeText {
+                    self.detectedLandscapeText = isLandscapeText
+                    if isLandscapeText {
+                        self.requestLandscapeRotation()
+                    }
+                }
+            }
+        }
+        request.recognitionLanguages = ["zh-Hant", "zh-Hans", "ko"]
+        request.recognitionLevel = .fast
+        request.minimumTextHeight = 0.02
+
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
+        try? handler.perform([request])
+    }
+
+    private func requestLandscapeRotation() {
+        // Force landscape orientation when landscape text detected
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        let currentOrientation = windowScene.interfaceOrientation
+        guard currentOrientation.isPortrait else { return }
+
+        let geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: .landscape)
+        windowScene.requestGeometryUpdate(geometryPreferences) { _ in }
+
+        // Also set the preferred orientation via the supported orientations
+        if #available(iOS 16.0, *) {
+            UIViewController.attemptRotationToDeviceOrientation()
         }
     }
 
@@ -399,11 +497,9 @@ class CameraViewModel: NSObject, ObservableObject {
 
     func capture() {
         let settings = AVCapturePhotoSettings()
-        // 현재 디바이스 방향에 맞는 photo orientation 설정
+        // Use accelerometer-based orientation for reliable rotation
         if let connection = output.connection(with: .video) {
-            let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-            let orientation = windowScene?.interfaceOrientation ?? .portrait
-            let angle: CGFloat = switch orientation {
+            let angle: CGFloat = switch deviceOrientation {
             case .landscapeRight: 0
             case .landscapeLeft: 180
             case .portraitUpsideDown: 270
@@ -452,5 +548,17 @@ extension CameraViewModel: AVCapturePhotoCaptureDelegate {
         Task { @MainActor in
             capturedImage = uiImage
         }
+    }
+}
+
+extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
+    nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        let shouldProcess = _shouldProcessFrame.withLock { val -> Bool in
+            guard val else { return false }
+            val = false
+            return true
+        }
+        guard shouldProcess else { return }
+        detectTextOrientation(in: sampleBuffer)
     }
 }
