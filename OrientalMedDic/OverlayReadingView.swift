@@ -478,16 +478,16 @@ class OverlayViewModel: NSObject, ObservableObject {
 
     let session = AVCaptureSession()
     private var device: AVCaptureDevice?
-    nonisolated(unsafe) private let db = DictionaryDB.shared
+    private let db = DictionaryDB.shared
 
     // MARK: - 실시간 OCR (비디오 프레임 캡처 방식)
 
     private let videoOutput = AVCaptureVideoDataOutput()
     private let processingQueue = DispatchQueue(label: "ocr.processing")
-    nonisolated(unsafe) private var liveOCRActive = false
-    nonisolated(unsafe) private var isOCRProcessing = false
-    nonisolated(unsafe) private var frameSize: CGSize = CGSize(width: 1080, height: 1920)
-    nonisolated(unsafe) private var lastFrameImage: UIImage?
+    private var liveOCRActive = false
+    private var isOCRProcessing = false
+    private var frameSize: CGSize = CGSize(width: 1080, height: 1920)
+    private var lastFrameImage: UIImage?
 
     func startLiveOCR() {
         liveOCRActive = true
@@ -733,53 +733,53 @@ class OverlayViewModel: NSObject, ObservableObject {
 
 extension OverlayViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
     nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard liveOCRActive, !isOCRProcessing else { return }
-        isOCRProcessing = true
-
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            isOCRProcessing = false
-            return
-        }
-
-        // 실제 프레임 크기 저장 (rotation 적용 후이므로 width < height)
-        let w = CVPixelBufferGetWidth(pixelBuffer)
-        let h = CVPixelBufferGetHeight(pixelBuffer)
-        frameSize = CGSize(width: w, height: h)
-        let aspect = CGFloat(w) / CGFloat(h)
         Task { @MainActor in
+            guard liveOCRActive, !isOCRProcessing else { return }
+            isOCRProcessing = true
+
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+                isOCRProcessing = false
+                return
+            }
+
+            // 실제 프레임 크기 저장 (rotation 적용 후이므로 width < height)
+            let w = CVPixelBufferGetWidth(pixelBuffer)
+            let h = CVPixelBufferGetHeight(pixelBuffer)
+            frameSize = CGSize(width: w, height: h)
+            let aspect = CGFloat(w) / CGFloat(h)
             if self.cameraFrameAspect != aspect {
                 self.cameraFrameAspect = aspect
             }
-        }
 
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext()
-        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
-            isOCRProcessing = false
-            return
-        }
-
-        // 마지막 프레임 저장
-        lastFrameImage = UIImage(cgImage: cgImage)
-
-        let request = VNRecognizeTextRequest { [weak self] request, _ in
-            guard let self,
-                  let observations = request.results as? [VNRecognizedTextObservation] else {
-                self?.isOCRProcessing = false
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            let context = CIContext()
+            guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+                isOCRProcessing = false
                 return
             }
-            // 실시간은 1-pass (한국어+중국어 동시) — 성능 우선
-            let items = self.buildOverlayItemsFromObservations(observations)
-            Task { @MainActor in
-                self.overlayItems = items
-                try? await Task.sleep(for: .seconds(3))
-                self.isOCRProcessing = false
-            }
-        }
-        request.recognitionLanguages = ["zh-Hant", "zh-Hans", "ko"]
-        request.recognitionLevel = .accurate
 
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        try? handler.perform([request])
+            // 마지막 프레임 저장
+            lastFrameImage = UIImage(cgImage: cgImage)
+
+            let request = VNRecognizeTextRequest { [weak self] request, _ in
+                guard let self,
+                      let observations = request.results as? [VNRecognizedTextObservation] else {
+                    self?.isOCRProcessing = false
+                    return
+                }
+                // 실시간은 1-pass (한국어+중국어 동시) — 성능 우선
+                let items = self.buildOverlayItemsFromObservations(observations)
+                Task { @MainActor in
+                    self.overlayItems = items
+                    try? await Task.sleep(for: .seconds(3))
+                    self.isOCRProcessing = false
+                }
+            }
+            request.recognitionLanguages = ["zh-Hant", "zh-Hans", "ko"]
+            request.recognitionLevel = .accurate
+
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            try? handler.perform([request])
+        }
     }
 }
