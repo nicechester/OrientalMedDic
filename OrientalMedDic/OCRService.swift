@@ -17,7 +17,7 @@ enum OCRService {
         request.recognitionLanguages = ["zh-Hant", "zh-Hans", "ko"]
         request.usesLanguageCorrection = false
 
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
         try? handler.perform([request])
         guard let results = request.results else { return [] }
 
@@ -82,7 +82,7 @@ enum OCRService {
                     req2.usesLanguageCorrection = false
                     req2.regionOfInterest = expanded
 
-                    let h2 = VNImageRequestHandler(cgImage: cgImage, options: [:])
+                    let h2 = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
                     try? h2.perform([req2])
 
                     if let zhText = req2.results?.first?.topCandidates(1).first?.string {
