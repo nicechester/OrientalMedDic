@@ -222,7 +222,7 @@ struct OverlayReadingView: View {
     // MARK: - 좌표 변환
 
     private func convertVisionToScreen(normalizedBox: CGRect, geoSize: CGSize) -> CGRect {
-        let frameAspect = self.cameraFrameAspect
+        let frameAspect = viewModel.cameraFrameAspect
         let screenAspect = geoSize.width / geoSize.height
 
         let scaleX: CGFloat
@@ -269,6 +269,15 @@ struct OverlayReadingView: View {
         let w = normalizedBox.width * displayRect.width
         let h = normalizedBox.height * displayRect.height
         return CGRect(x: x, y: y, width: w, height: h)
+    }
+
+    private func normalizeOrientation(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+        image.draw(in: CGRect(origin: .zero, size: image.size))
+        let normalized = UIGraphicsGetImageFromCurrentImageContext() ?? image
+        UIGraphicsEndImageContext()
+        return normalized
     }
 }
 
@@ -533,7 +542,7 @@ class OverlayViewModel: NSObject, ObservableObject {
     func captureSnapshot() {
         stopLiveOCR()
         if let image = lastFrameImage {
-            let normalized = self.normalizeOrientation(image)
+            let normalized = viewModel.normalizeOrientation(image)
             Task { @MainActor in
                 capturedImage = normalized
             }
