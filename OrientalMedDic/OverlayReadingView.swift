@@ -533,20 +533,11 @@ class OverlayViewModel: NSObject, ObservableObject {
     func captureSnapshot() {
         stopLiveOCR()
         if let image = lastFrameImage {
-            let normalized = normalizeOrientation(image)
+            let normalized = viewModel.normalizeOrientation(image)
             Task { @MainActor in
                 capturedImage = normalized
             }
         }
-    }
-
-    private func normalizeOrientation(_ image: UIImage) -> UIImage {
-        guard image.imageOrientation != .up else { return image }
-        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
-        image.draw(in: CGRect(origin: .zero, size: image.size))
-        let normalized = UIGraphicsGetImageFromCurrentImageContext() ?? image
-        UIGraphicsEndImageContext()
-        return normalized
     }
 
     func setZoom(_ factor: CGFloat) {
