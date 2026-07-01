@@ -271,14 +271,6 @@ struct OverlayReadingView: View {
         return CGRect(x: x, y: y, width: w, height: h)
     }
 
-    private func normalizeOrientation(_ image: UIImage) -> UIImage {
-        guard image.imageOrientation != .up else { return image }
-        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
-        image.draw(in: CGRect(origin: .zero, size: image.size))
-        let normalized = UIGraphicsGetImageFromCurrentImageContext() ?? image
-        UIGraphicsEndImageContext()
-        return normalized
-    }
 }
 
 // MARK: - 글자 상세 팝업
@@ -542,7 +534,7 @@ class OverlayViewModel: NSObject, ObservableObject {
     func captureSnapshot() {
         stopLiveOCR()
         if let image = lastFrameImage {
-            let normalized = viewModel.normalizeOrientation(image)
+            let normalized = self.normalizeOrientation(image)
             Task { @MainActor in
                 capturedImage = normalized
             }
@@ -575,6 +567,15 @@ class OverlayViewModel: NSObject, ObservableObject {
                 self?.isProcessing = false
             }
         }
+    }
+
+    private func normalizeOrientation(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+        image.draw(in: CGRect(origin: .zero, size: image.size))
+        let normalized = UIGraphicsGetImageFromCurrentImageContext() ?? image
+        UIGraphicsEndImageContext()
+        return normalized
     }
 
     func reset() {
