@@ -46,7 +46,7 @@ struct CameraView: View {
     private var cameraLayer: some View {
         GeometryReader { geo in
             ZStack {
-                CameraPreview(session: viewModel.session)
+                CameraPreview(session: viewModel.session, deviceOrientation: viewModel.deviceOrientation)
                     .simultaneousGesture(
                         MagnifyGesture()
                             .onChanged { value in
@@ -324,6 +324,7 @@ struct CropView: View {
 
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    let deviceOrientation: UIDeviceOrientation
 
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView()
@@ -332,26 +333,34 @@ struct CameraPreview: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: PreviewUIView, context: Context) {}
+    func updateUIView(_ uiView: PreviewUIView, context: Context) {
+        uiView.deviceOrientation = deviceOrientation
+    }
 
     class PreviewUIView: UIView {
+        var deviceOrientation: UIDeviceOrientation = .portrait {
+            didSet {
+                guard let connection = previewLayer.connection else { return }
+                let angle: CGFloat = switch deviceOrientation {
+                case .landscapeRight: 180.0
+                case .landscapeLeft: 0.0
+                case .portraitUpsideDown: 270.0
+                case .portrait: 90.0
+                default: 90.0
+                }
+                
+                if connection.isVideoRotationAngleSupported(angle) {
+                    connection.videoRotationAngle = angle
+                }
+            }
+        }
+        
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+        
         override func layoutSubviews() {
             super.layoutSubviews()
             previewLayer.frame = bounds
-            guard let connection = previewLayer.connection else { return }
-            let windowScene = window?.windowScene
-            let orientation = windowScene?.interfaceOrientation ?? .portrait
-            let angle: CGFloat = switch orientation {
-            case .landscapeRight: 0
-            case .landscapeLeft: 180
-            case .portraitUpsideDown: 270
-            default: 90
-            }
-            if connection.isVideoRotationAngleSupported(angle) {
-                connection.videoRotationAngle = angle
-            }
         }
     }
 }
@@ -364,13 +373,13 @@ class CameraViewModel: NSObject, ObservableObject {
     @Published var capturedImage: UIImage?
     @Published var showResult = false
     @Published var detectedLandscapeText = false
+    @Published var deviceOrientation: UIDeviceOrientation = .portrait
 
     let session = AVCaptureSession()
     private let output = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private var device: AVCaptureDevice?
     private let motionManager = CMMotionManager()
-    private var deviceOrientation: UIDeviceOrientation = .portrait
     private var textDetectionTimer: Timer?
     private let textDetectionQueue = DispatchQueue(label: "textDetection", qos: .utility)
 
@@ -499,12 +508,13 @@ class CameraViewModel: NSObject, ObservableObject {
         let settings = AVCapturePhotoSettings()
         // Use accelerometer-based orientation for reliable rotation
         if let connection = output.connection(with: .video) {
+            // Correct rotation angles for Rear Camera Capture
             let angle: CGFloat = switch deviceOrientation {
-            case .landscapeRight: 0
-            case .landscapeLeft: 180
-            case .portraitUpsideDown: 270
-            case .portrait: 0
-            default: 0
+            case .landscapeRight: 180.0
+            case .landscapeLeft: 0.0
+            case .portraitUpsideDown: 270.0
+            case .portrait: 90.0
+            default: 0.0
             }
             if connection.isVideoRotationAngleSupported(angle) {
                 connection.videoRotationAngle = angle
