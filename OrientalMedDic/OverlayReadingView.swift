@@ -144,30 +144,58 @@ struct OverlayReadingView: View {
             let displayRect = calculateDisplayRect(imageSize: image.size, geoSize: geo.size)
 
             ZStack {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZStack {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                ForEach(viewModel.overlayItems) { item in
-                    let rect = convertToScreen(normalizedBox: item.box, displayRect: displayRect)
+                    ForEach(viewModel.overlayItems) { item in
+                        let rect = convertToScreen(normalizedBox: item.box, displayRect: displayRect)
 
-                    Rectangle()
-                        .fill(Color.white.opacity(0.5))
-                        .frame(width: rect.width, height: rect.height)
-                        .position(x: rect.midX, y: rect.midY)
+                        Rectangle()
+                            .fill(Color.white.opacity(0.5))
+                            .frame(width: rect.width, height: rect.height)
+                            .position(x: rect.midX, y: rect.midY)
 
-                    Text(item.reading)
-                        .font(.system(size: max(rect.height * 0.6, 9)))
-                        .foregroundStyle(.red)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .frame(width: rect.width, height: rect.height)
-                        .position(x: rect.midX, y: rect.midY)
-                        .onTapGesture { selectedItem = item }
+                        Text(item.reading)
+                            .font(.system(size: max(rect.height * 0.6, 9)))
+                            .foregroundStyle(.red)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                            .frame(width: rect.width, height: rect.height)
+                            .position(x: rect.midX, y: rect.midY)
+                            .onTapGesture { selectedItem = item }
+                    }
+                }
+                .scaleEffect(zoomScale)
+                .offset(offset)
+                .gesture(
+                    MagnifyGesture()
+                        .onChanged { value in zoomScale = lastZoomScale * value.magnification }
+                        .onEnded { _ in
+                            lastZoomScale = max(zoomScale, 1.0)
+                            zoomScale = lastZoomScale
+                        }
+                )
+                .simultaneousGesture(
+                    DragGesture()
+                        .onChanged { value in
+                            offset = CGSize(
+                                width: lastOffset.width + value.translation.width,
+                                height: lastOffset.height + value.translation.height
+                            )
+                        }
+                        .onEnded { _ in lastOffset = offset }
+                )
+                .onTapGesture(count: 2) {
+                    withAnimation {
+                        zoomScale = 1.0; lastZoomScale = 1.0
+                        offset = .zero; lastOffset = .zero
+                    }
                 }
 
-                // 하단 버튼
+                // 하단 버튼 (fixed)
                 VStack {
                     Spacer()
                     Button(action: {
@@ -187,32 +215,6 @@ struct OverlayReadingView: View {
                         .cornerRadius(8)
                     }
                     .padding(.bottom, 120)
-                }
-            }
-            .scaleEffect(zoomScale)
-            .offset(offset)
-            .gesture(
-                MagnifyGesture()
-                    .onChanged { value in zoomScale = lastZoomScale * value.magnification }
-                    .onEnded { _ in
-                        lastZoomScale = max(zoomScale, 1.0)
-                        zoomScale = lastZoomScale
-                    }
-            )
-            .simultaneousGesture(
-                DragGesture()
-                    .onChanged { value in
-                        offset = CGSize(
-                            width: lastOffset.width + value.translation.width,
-                            height: lastOffset.height + value.translation.height
-                        )
-                    }
-                    .onEnded { _ in lastOffset = offset }
-            )
-            .onTapGesture(count: 2) {
-                withAnimation {
-                    zoomScale = 1.0; lastZoomScale = 1.0
-                    offset = .zero; lastOffset = .zero
                 }
             }
         }
