@@ -4,7 +4,6 @@ import Vision
 import Combine
 import PhotosUI
 import CoreMotion
-import os
 
 struct CameraView: View {
     @ObservedObject var viewModel: CameraViewModel
@@ -22,7 +21,7 @@ struct CameraView: View {
                         viewModel.performOCR(on: croppedImage)
                     }, onRetake: {
                         viewModel.retake()
-                    })
+                    }, viewModel: viewModel)
                 } else {
                     // 1단계: 카메라 모드
                     cameraLayer
@@ -106,11 +105,13 @@ struct CropView: View {
     let image: UIImage
     let onCrop: (CGImage) -> Void
     let onRetake: () -> Void
+    @ObservedObject var viewModel: CameraViewModel
 
     @State private var roiRect = CGRect.zero
     @State private var dragStart: CGRect = .zero
     @State private var zoomLevel: CGFloat = 1.0
     @State private var lastZoomLevel: CGFloat = 1.0
+    @State private var isInitialized = false
 
     var body: some View {
         GeometryReader { geo in
@@ -176,7 +177,10 @@ struct CropView: View {
                 VStack {
                     Spacer()
                     HStack(spacing: 40) {
-                        Button(action: onRetake) {
+                        Button(action: {
+                            viewModel.lastCropRect = nil
+                            onRetake()
+                        }) {
                             Label("취소", systemImage: "xmark")
                                 .font(.headline)
                                 .padding(.horizontal, 16)
@@ -198,8 +202,26 @@ struct CropView: View {
                     .padding(.bottom, 120)
                 }
             }
-            .onAppear { resetROI(for: geoSize) }
-            .onChange(of: geoSize) { _, newSize in resetROI(for: newSize) }
+            .onAppear {
+                if !isInitialized {
+                    if let savedRect = viewModel.lastCropRect {
+                        roiRect = savedRect
+                    } else {
+                        resetROI(for: geoSize)
+                    }
+                    isInitialized = true
+                }
+            }
+            .onChange(of: geoSize) { _, newSize in
+                if !isInitialized {
+                    if let savedRect = viewModel.lastCropRect {
+                        roiRect = savedRect
+                    } else {
+                        resetROI(for: newSize)
+                    }
+                    isInitialized = true
+                }
+            }
         }
         .ignoresSafeArea()
     }
@@ -306,6 +328,7 @@ struct CropView: View {
                               width: min(cropW, imgW), height: min(cropH, imgH))
 
         if let cropped = cgImage.cropping(to: cropRect) {
+            viewModel.lastCropRect = roiRect
             onCrop(cropped)
         }
     }
@@ -348,16 +371,16 @@ struct CameraPreview: UIViewRepresentable {
                 case .portrait: 90.0
                 default: 90.0
                 }
-                
+
                 if connection.isVideoRotationAngleSupported(angle) {
                     connection.videoRotationAngle = angle
                 }
             }
         }
-        
+
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
-        
+
         override func layoutSubviews() {
             super.layoutSubviews()
             previewLayer.frame = bounds
@@ -372,16 +395,13 @@ class CameraViewModel: NSObject, ObservableObject {
     @Published var recognizedText: String?
     @Published var capturedImage: UIImage?
     @Published var showResult = false
-    @Published var detectedLandscapeText = false
+    @Published var lastCropRect: CGRect?
     @Published var deviceOrientation: UIDeviceOrientation = .portrait
 
     let session = AVCaptureSession()
     private let output = AVCapturePhotoOutput()
-    private let videoOutput = AVCaptureVideoDataOutput()
     private var device: AVCaptureDevice?
     private let motionManager = CMMotionManager()
-    private var textDetectionTimer: Timer?
-    private let textDetectionQueue = DispatchQueue(label: "textDetection", qos: .utility)
 
     func startSession() {
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
@@ -391,14 +411,9 @@ class CameraViewModel: NSObject, ObservableObject {
         session.beginConfiguration()
         if session.canAddInput(input) { session.addInput(input) }
         if session.canAddOutput(output) { session.addOutput(output) }
-        // Add video output for text orientation detection
-        videoOutput.setSampleBufferDelegate(self, queue: textDetectionQueue)
-        videoOutput.alwaysDiscardsLateVideoFrames = true
-        if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
         session.commitConfiguration()
 
         startMotionUpdates()
-        startTextOrientationDetection()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.session.startRunning()
@@ -407,14 +422,10 @@ class CameraViewModel: NSObject, ObservableObject {
 
     func stopSession() {
         stopMotionUpdates()
-        textDetectionTimer?.invalidate()
-        textDetectionTimer = nil
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.session.stopRunning()
         }
     }
-
-    // MARK: - Motion-based orientation (reliable for photo capture)
 
     private func startMotionUpdates() {
         motionManager.accelerometerUpdateInterval = 0.2
@@ -434,65 +445,7 @@ class CameraViewModel: NSObject, ObservableObject {
         motionManager.stopAccelerometerUpdates()
     }
 
-    // MARK: - Text orientation detection
 
-    private let _shouldProcessFrame = OSAllocatedUnfairLock(initialState: false)
-
-    private func startTextOrientationDetection() {
-        textDetectionTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            self?._shouldProcessFrame.withLock { $0 = true }
-        }
-    }
-
-    nonisolated func detectTextOrientation(in sampleBuffer: CMSampleBuffer) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-        let request = VNRecognizeTextRequest { [weak self] request, _ in
-            guard let results = request.results as? [VNRecognizedTextObservation], results.count >= 3 else { return }
-
-            // Check if text bounding boxes are wider than tall (landscape text in portrait frame)
-            var landscapeCount = 0
-            for obs in results.prefix(10) {
-                let box = obs.boundingBox
-                if box.width > box.height * 2.0 {
-                    landscapeCount += 1
-                }
-            }
-
-            let isLandscapeText = landscapeCount > results.prefix(10).count / 2
-
-            Task { @MainActor in
-                guard let self = self else { return }
-                if self.detectedLandscapeText != isLandscapeText {
-                    self.detectedLandscapeText = isLandscapeText
-                    if isLandscapeText {
-                        self.requestLandscapeRotation()
-                    }
-                }
-            }
-        }
-        request.recognitionLanguages = ["zh-Hant", "zh-Hans", "ko"]
-        request.recognitionLevel = .fast
-        request.minimumTextHeight = 0.02
-
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
-        try? handler.perform([request])
-    }
-
-    private func requestLandscapeRotation() {
-        // Force landscape orientation when landscape text detected
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
-        let currentOrientation = windowScene.interfaceOrientation
-        guard currentOrientation.isPortrait else { return }
-
-        let geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: .landscape)
-        windowScene.requestGeometryUpdate(geometryPreferences) { _ in }
-
-        // Also set the preferred orientation via the supported orientations
-        if #available(iOS 16.0, *) {
-            UIViewController.attemptRotationToDeviceOrientation()
-        }
-    }
 
     func setZoom(_ factor: CGFloat) {
         guard let device = device else { return }
@@ -506,9 +459,7 @@ class CameraViewModel: NSObject, ObservableObject {
 
     func capture() {
         let settings = AVCapturePhotoSettings()
-        // Use accelerometer-based orientation for reliable rotation
         if let connection = output.connection(with: .video) {
-            // Correct rotation angles for Rear Camera Capture
             let angle: CGFloat = switch deviceOrientation {
             case .landscapeRight: 180.0
             case .landscapeLeft: 0.0
@@ -562,14 +513,3 @@ extension CameraViewModel: AVCapturePhotoCaptureDelegate {
     }
 }
 
-extension CameraViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
-    nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        let shouldProcess = _shouldProcessFrame.withLock { val -> Bool in
-            guard val else { return false }
-            val = false
-            return true
-        }
-        guard shouldProcess else { return }
-        detectTextOrientation(in: sampleBuffer)
-    }
-}
