@@ -506,6 +506,9 @@ class OverlayViewModel: NSObject, ObservableObject {
             videoOutput.alwaysDiscardsLateVideoFrames = true
             if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
             session.commitConfiguration()
+        } else {
+            // Ensure delegate is set if session was already configured
+            videoOutput.setSampleBufferDelegate(self, queue: processingQueue)
         }
 
         updateVideoOutputRotation()
@@ -522,11 +525,12 @@ class OverlayViewModel: NSObject, ObservableObject {
         guard let connection = videoOutput.connection(with: .video) else { return }
         let orientation = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }.first?.interfaceOrientation ?? .portrait
+        // Use same angles as CameraView for consistency
         let angle: CGFloat = switch orientation {
-        case .landscapeRight: 0
-        case .landscapeLeft: 180
-        case .portraitUpsideDown: 270
-        default: 90
+        case .landscapeRight: 180.0
+        case .landscapeLeft: 0.0
+        case .portraitUpsideDown: 270.0
+        default: 90.0
         }
         if connection.isVideoRotationAngleSupported(angle) {
             connection.videoRotationAngle = angle
@@ -535,10 +539,11 @@ class OverlayViewModel: NSObject, ObservableObject {
 
     func captureSnapshot() {
         stopLiveOCR()
+        // Update rotation angle before using the last frame, same as CameraView.capture()
+        updateVideoOutputRotation()
         if let image = lastFrameImage {
-            let normalized = self.normalizeOrientation(image)
             Task { @MainActor in
-                capturedImage = normalized
+                capturedImage = image
             }
         }
     }
@@ -573,8 +578,25 @@ class OverlayViewModel: NSObject, ObservableObject {
 
     private func normalizeOrientation(_ image: UIImage) -> UIImage {
         guard image.imageOrientation != .up else { return image }
-        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
-        image.draw(in: CGRect(origin: .zero, size: image.size))
+
+        // For .left and .right orientations (landscape), swap dimensions
+        let contextSize: CGSize
+        let drawRect: CGRect
+
+        switch image.imageOrientation {
+        case .right:
+            contextSize = CGSize(width: image.size.height, height: image.size.width)
+            drawRect = CGRect(x: 0, y: 0, width: image.size.height, height: image.size.width)
+        case .left:
+            contextSize = CGSize(width: image.size.height, height: image.size.width)
+            drawRect = CGRect(x: 0, y: 0, width: image.size.height, height: image.size.width)
+        default:
+            contextSize = image.size
+            drawRect = CGRect(origin: .zero, size: image.size)
+        }
+
+        UIGraphicsBeginImageContextWithOptions(contextSize, false, image.scale)
+        image.draw(in: drawRect)
         let normalized = UIGraphicsGetImageFromCurrentImageContext() ?? image
         UIGraphicsEndImageContext()
         return normalized
