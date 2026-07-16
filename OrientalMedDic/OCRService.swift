@@ -10,14 +10,23 @@ enum OCRService {
     }
 
     /// 이미지에서 2-pass OCR 수행, 결과를 줄 단위로 반환
-    static func recognize(cgImage: CGImage) -> [OCRLine] {
+    /// - Parameters:
+    ///   - cgImage: 인식할 이미지
+    ///   - usePreprocessing: 낮은 해상도 이미지 전처리 활성화 (기본값: false - 성능 우선)
+    static func recognize(cgImage: CGImage, usePreprocessing: Bool = false) -> [OCRLine] {
+        // Optional: Preprocess low-res images for better accuracy
+        let processedImage = usePreprocessing
+            ? ImagePreprocessor.preprocess(cgImage) ?? cgImage
+            : cgImage
+
         // Pass 1: 한국어+중국어 동시 인식 (기본 인식률 유지)
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["zh-Hant", "zh-Hans", "ko"]
         request.usesLanguageCorrection = false
+        request.minimumTextHeight = 0.0 // Don't filter small text
 
-        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+        let handler = VNImageRequestHandler(cgImage: processedImage, orientation: .up, options: [:])
         try? handler.perform([request])
         guard let results = request.results else { return [] }
 
@@ -35,7 +44,7 @@ enum OCRService {
             }
 
             // 괄호 안 내용을 중국어 OCR로 재인식
-            let finalText = resolveParentheses(text: text, candidate: candidate, cgImage: cgImage)
+            let finalText = resolveParentheses(text: text, candidate: candidate, cgImage: processedImage)
             output.append(OCRLine(text: finalText, box: lineBbox))
         }
 

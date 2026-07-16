@@ -60,7 +60,8 @@ struct CameraView: View {
 
                 VStack {
                     Spacer()
-                    HStack(spacing: 60) {
+
+                    HStack(spacing: 12) {
                         PhotosPicker(selection: $selectedPhoto, matching: .images) {
                             Image(systemName: "photo.on.rectangle")
                                 .font(.system(size: 28))
@@ -68,6 +69,31 @@ struct CameraView: View {
                                 .frame(width: 50, height: 50)
                                 .background(.ultraThinMaterial)
                                 .clipShape(Circle())
+                        }
+
+                        // 줌 표시기
+                        Text(String(format: "%.1f×", zoomLevel))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(minWidth: 45)
+                            .frame(height: 32)
+                            .background(Color.black.opacity(0.5))
+                            .cornerRadius(8)
+
+                        // 리셋 줌 버튼
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                zoomLevel = 1.0
+                                lastZoomLevel = 1.0
+                                viewModel.setZoom(1.0)
+                            }
+                        }) {
+                            Image(systemName: "arrow.down.left.and.arrow.up.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                                .background(Color.blue.opacity(0.6))
+                                .cornerRadius(6)
                         }
 
                         Button(action: { viewModel.capture() }) {
@@ -173,34 +199,59 @@ struct CropView: View {
                     cornerHandle(.bottomRight)
                 }
 
-                // 하단 버튼
+                // 줌 표시기 + 버튼
                 VStack {
                     Spacer()
-                    HStack(spacing: 40) {
+
+                    HStack(spacing: 12) {
                         Button(action: {
                             viewModel.lastCropRect = nil
                             onRetake()
                         }) {
-                            Label("취소", systemImage: "xmark")
-                                .font(.headline)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
                                 .background(.ultraThinMaterial)
-                                .cornerRadius(20)
+                                .cornerRadius(22)
+                        }
+
+                        // 줌 표시기
+                        Text(String(format: "%.1f×", zoomLevel))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(minWidth: 45)
+                            .frame(height: 32)
+                            .background(Color.black.opacity(0.5))
+                            .cornerRadius(8)
+
+                        // 리셋 줌 버튼
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                zoomLevel = 1.0
+                                lastZoomLevel = 1.0
+                            }
+                        }) {
+                            Image(systemName: "arrow.down.left.and.arrow.up.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                                .background(Color.blue.opacity(0.6))
+                                .cornerRadius(6)
                         }
 
                         Button(action: { cropAndRecognize(geoSize: geoSize) }) {
-                            Label("인식", systemImage: "text.viewfinder")
-                                .font(.headline)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 10)
-                                .background(.blue)
+                            Image(systemName: "text.viewfinder")
+                                .font(.system(size: 18, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .cornerRadius(20)
+                                .frame(width: 44, height: 44)
+                                .background(.blue)
+                                .cornerRadius(22)
                         }
                     }
                     .padding(.bottom, 120)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .onAppear {
                 if !isInitialized {
@@ -481,17 +532,9 @@ class CameraViewModel: NSObject, ObservableObject {
 
     func performOCR(on image: CGImage) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let request = VNRecognizeTextRequest()
-            request.recognitionLanguages = ["zh-Hant", "zh-Hans", "ko"]
-            request.recognitionLevel = .accurate
-
-            let handler = VNImageRequestHandler(cgImage: image, options: [:])
-            try? handler.perform([request])
-
-            let text = (request.results ?? []).compactMap {
-                $0.topCandidates(1).first?.string
-            }.joined(separator: "\n")
-
+            // Use preprocessing for better accuracy on low-res captures
+            let lines = OCRService.recognize(cgImage: image, usePreprocessing: true)
+            let text = lines.map { $0.text }.joined(separator: "\n")
             let readingText = DictionaryDB.shared.generateReadingText(for: text)
 
             Task { @MainActor in
