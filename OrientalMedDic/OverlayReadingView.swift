@@ -86,10 +86,11 @@ struct OverlayReadingView: View {
                         }
                 }
 
-                // 하단 버튼들
+                // 줌 표시기 + 버튼 + 캡처 버튼
                 VStack {
                     Spacer()
-                    HStack(spacing: 60) {
+
+                    HStack(spacing: 16) {
                         PhotosPicker(selection: $selectedPhoto, matching: .images) {
                             Image(systemName: "photo.on.rectangle")
                                 .font(.system(size: 28))
@@ -97,6 +98,31 @@ struct OverlayReadingView: View {
                                 .frame(width: 50, height: 50)
                                 .background(.ultraThinMaterial)
                                 .clipShape(Circle())
+                        }
+
+                        // 줌 표시기
+                        Text(String(format: "%.1f×", cameraZoom))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(minWidth: 45)
+                            .frame(height: 32)
+                            .background(Color.black.opacity(0.5))
+                            .cornerRadius(8)
+
+                        // 리셋 줌 버튼
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                cameraZoom = 1.0
+                                lastCameraZoom = 1.0
+                                viewModel.setZoom(1.0)
+                            }
+                        }) {
+                            Image(systemName: "arrow.down.left.and.arrow.up.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                                .background(Color.blue.opacity(0.6))
+                                .cornerRadius(6)
                         }
 
                         Button(action: { viewModel.captureSnapshot() }) {
@@ -110,6 +136,7 @@ struct OverlayReadingView: View {
                     }
                     .padding(.bottom, 120)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
             .gesture(
                 MagnifyGesture()
@@ -195,27 +222,56 @@ struct OverlayReadingView: View {
                     }
                 }
 
-                // 하단 버튼 (fixed)
+                // 하단 버튼 + 줌 컨트롤
                 VStack {
                     Spacer()
-                    Button(action: {
-                        viewModel.capturedImage = nil
-                        viewModel.overlayItems = []
-                        mode = .camera
-                    }) {
-                        HStack(spacing: 6) {
+
+                    HStack(spacing: 12) {
+                        // 취소 버튼 (아이콘만)
+                        Button(action: {
+                            viewModel.capturedImage = nil
+                            viewModel.overlayItems = []
+                            mode = .camera
+                        }) {
                             Image(systemName: "xmark")
-                            Text("취소")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                                .background(Color.gray.opacity(0.6))
+                                .cornerRadius(22)
                         }
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: 120)
-                        .frame(height: 44)
-                        .background(Color.gray.opacity(0.6))
-                        .cornerRadius(8)
+
+                        // 줌 레벨 표시
+                        Text(String(format: "%.1f×", zoomScale))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(minWidth: 45)
+                            .frame(height: 32)
+                            .background(Color.black.opacity(0.5))
+                            .cornerRadius(8)
+
+                        // 리셋 줌 버튼
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                zoomScale = 1.0
+                                lastZoomScale = 1.0
+                                offset = .zero
+                                lastOffset = .zero
+                            }
+                        }) {
+                            Image(systemName: "arrow.down.left.and.arrow.up.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                                .background(Color.blue.opacity(0.6))
+                                .cornerRadius(6)
+                        }
+
+                        Spacer()
                     }
                     .padding(.bottom, 120)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .ignoresSafeArea()
@@ -539,12 +595,10 @@ class OverlayViewModel: NSObject, ObservableObject {
 
     func captureSnapshot() {
         stopLiveOCR()
-        // Update rotation angle before using the last frame, same as CameraView.capture()
         updateVideoOutputRotation()
         if let image = lastFrameImage {
-            Task { @MainActor in
-                capturedImage = image
-            }
+            // Re-run OCR on captured frame with preprocessing for better accuracy
+            processImage(image)
         }
     }
 
@@ -567,7 +621,7 @@ class OverlayViewModel: NSObject, ObservableObject {
             isProcessing = false
             return
         }
-        performOCR(on: cgImage) { [weak self] items in
+        performOCR(on: cgImage, usePreprocessing: true) { [weak self] items in
             Task { @MainActor in
                 self?.overlayItems = items
                 self?.capturedImage = normalized
@@ -666,14 +720,21 @@ class OverlayViewModel: NSObject, ObservableObject {
 
     // MARK: - OCR 처리
 
-    private func performOCR(on cgImage: CGImage, completion: @escaping ([OverlayItem]) -> Void) {
+    private func performOCR(on cgImage: CGImage, usePreprocessing: Bool = false, completion: @escaping ([OverlayItem]) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { completion([]); return }
+
+            // Apply preprocessing only for static captures (not live frames)
+            let processedImage = usePreprocessing
+                ? ImagePreprocessor.preprocess(cgImage) ?? cgImage
+                : cgImage
+
             let request = VNRecognizeTextRequest()
             request.recognitionLanguages = ["zh-Hant", "zh-Hans", "ko"]
             request.recognitionLevel = .accurate
+            request.minimumTextHeight = 0.0
 
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            let handler = VNImageRequestHandler(cgImage: processedImage, options: [:])
             try? handler.perform([request])
 
             guard let observations = request.results else {
