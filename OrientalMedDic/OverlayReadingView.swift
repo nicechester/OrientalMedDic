@@ -225,27 +225,25 @@ struct OverlayReadingView: View {
                 )
                 .frame(width: rect.width, height: rect.height)
 
-            // 독음 (토글)
+            // 독음 + 사전 아이콘 (토글 시에만)
             if isVisible {
-                Text(item.reading)
-                    .font(.system(size: fontSize))
-                    .foregroundStyle(.red)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.4)
-                    .frame(width: rect.width - 18, height: rect.height)
-                    .offset(x: -9)
-            }
+                HStack(spacing: 2) {
+                    Text(item.reading)
+                        .font(.system(size: fontSize))
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.4)
 
-            // 사전 아이콘
-            Button(action: { selectedItem = item }) {
-                Image(systemName: "book.closed.fill")
-                    .font(.system(size: min(fontSize, 11)))
-                    .foregroundStyle(.white)
-                    .padding(2)
-                    .background(Color.blue.opacity(0.75))
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    Image(systemName: "book.closed.fill")
+                        .font(.system(size: min(fontSize * 0.8, 11)))
+                        .foregroundStyle(.white)
+                        .padding(2)
+                        .background(Color.blue.opacity(0.75))
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .onTapGesture { selectedItem = item }
+                }
+                .frame(width: rect.width, height: rect.height)
             }
-            .offset(x: 0, y: 0)
         }
         .frame(width: rect.width, height: rect.height)
         .position(x: rect.midX, y: rect.midY)
