@@ -509,7 +509,7 @@ class OverlayViewModel: NSObject, ObservableObject {
         capturedImage = nil
         visibleReadings = []
         readingTimers.values.forEach { $0.cancel() }
-        readingTimers = []
+        readingTimers = [:]
 
         if session.inputs.isEmpty {
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
