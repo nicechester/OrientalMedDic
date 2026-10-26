@@ -219,10 +219,6 @@ struct OverlayReadingView: View {
             // 바운딩 박스
             RoundedRectangle(cornerRadius: 3)
                 .stroke(Color.yellow.opacity(0.8), lineWidth: 1.5)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(isVisible ? Color.black.opacity(0.45) : Color.clear)
-                )
                 .frame(width: rect.width, height: rect.height)
 
             // 독음 + 사전 아이콘 (토글 시에만)
@@ -230,7 +226,7 @@ struct OverlayReadingView: View {
                 HStack(spacing: 2) {
                     Text(item.reading)
                         .font(.system(size: fontSize))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(.black)
                         .lineLimit(1)
                         .minimumScaleFactor(0.4)
 
@@ -242,10 +238,14 @@ struct OverlayReadingView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                         .onTapGesture { selectedItem = item }
                 }
-                .frame(width: rect.width, height: rect.height)
+                .padding(.horizontal, 4)
+                .frame(height: rect.height)
+                .background(Color.white.opacity(0.92))
+                .clipShape(RoundedRectangle(cornerRadius: 3))
             }
         }
         .frame(width: rect.width, height: rect.height)
+        .contentShape(Rectangle())
         .position(x: rect.midX, y: rect.midY)
         .onTapGesture {
             viewModel.toggleReading(for: item.id)
@@ -483,12 +483,24 @@ class OverlayViewModel: NSObject, ObservableObject {
     private var isOCRProcessing = false
     private var frameSize: CGSize = CGSize(width: 1080, height: 1920)
     private var lastFrameImage: UIImage?
+    private var readingTimers: [UUID: Task<Void, Never>] = [:]
 
     func toggleReading(for id: UUID) {
         if visibleReadings.contains(id) {
+            // 수동 off: 즉시 숨김 + 타이머 취소
             visibleReadings.remove(id)
+            readingTimers[id]?.cancel()
+            readingTimers[id] = nil
         } else {
+            // on: 독음 표시 + 20초 자동 숨김 타이머
             visibleReadings.insert(id)
+            readingTimers[id]?.cancel()
+            readingTimers[id] = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(20))
+                guard !Task.isCancelled else { return }
+                self?.visibleReadings.remove(id)
+                self?.readingTimers[id] = nil
+            }
         }
     }
 
@@ -496,6 +508,8 @@ class OverlayViewModel: NSObject, ObservableObject {
         liveOCRActive = true
         capturedImage = nil
         visibleReadings = []
+        readingTimers.values.forEach { $0.cancel() }
+        readingTimers = []
 
         if session.inputs.isEmpty {
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
@@ -677,7 +691,8 @@ class OverlayViewModel: NSObject, ObservableObject {
 extension OverlayViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
     nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         Task { @MainActor in
-            guard liveOCRActive, !isOCRProcessing else { return }
+            // 독음이 하나라도 표시 중이면 재스캔 안 함
+            guard liveOCRActive, !isOCRProcessing, visibleReadings.isEmpty else { return }
             isOCRProcessing = true
 
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
@@ -708,11 +723,7 @@ extension OverlayViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                 }
                 let items = self.buildOverlayItemsFromObservations(observations)
                 Task { @MainActor in
-                    // Preserve visible readings for items that still exist
-                    let newIDs = Set(items.map { $0.id })
-                    self.visibleReadings = self.visibleReadings.intersection(newIDs)
                     self.overlayItems = items
-                    try? await Task.sleep(for: .seconds(3))
                     self.isOCRProcessing = false
                 }
             }
