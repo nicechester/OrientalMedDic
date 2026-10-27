@@ -8,12 +8,6 @@ struct OverlayReadingView: View {
     @StateObject private var viewModel = OverlayViewModel()
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedItem: OverlayItem?
-    @State private var mode: OverlayMode = .camera
-
-    enum OverlayMode {
-        case camera
-        case photo(UIImage)
-    }
 
     var body: some View {
         NavigationStack {
@@ -21,12 +15,7 @@ struct OverlayReadingView: View {
                 if let capturedImage = viewModel.capturedImage {
                     staticOverlayView(image: capturedImage)
                 } else {
-                    switch mode {
-                    case .camera:
-                        liveCameraView
-                    case .photo(let image):
-                        staticOverlayView(image: image)
-                    }
+                    liveCameraView
                 }
             }
             .navigationTitle("독음 오버레이")
@@ -42,12 +31,10 @@ struct OverlayReadingView: View {
                     if let data = try? await item.loadTransferable(type: Data.self),
                        let uiImage = UIImage(data: data) {
                         viewModel.processImage(uiImage)
-                        mode = .photo(uiImage)
                     }
                     selectedPhoto = nil
                 }
             }
-
         }
     }
 
@@ -60,36 +47,19 @@ struct OverlayReadingView: View {
         GeometryReader { geo in
             ZStack {
                 LiveCameraPreview(session: viewModel.session)
+                    .onTapGesture {
+                        viewModel.dismissReading()
+                    }
 
-                // 실시간 오버레이
+                // 실시간 오버레이 — 바운딩 박스 + 탭 토글 독음 + 사전 아이콘
                 ForEach(viewModel.overlayItems) { item in
-                    let rect = convertVisionToScreen(
-                        normalizedBox: item.box,
-                        geoSize: geo.size
-                    )
-                    Rectangle()
-                        .fill(Color.white.opacity(0.5))
-                        .frame(width: rect.width, height: rect.height)
-                        .position(x: rect.midX, y: rect.midY)
-
-                    Text(item.reading)
-                        .font(.system(size: max(rect.height * 0.6, 9)))
-                        .foregroundStyle(.red)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .frame(width: rect.width, height: rect.height)
-                        .position(x: rect.midX, y: rect.midY)
-                        .onTapGesture {
-                            viewModel.refineItem(item) { refined in
-                                selectedItem = refined
-                            }
-                        }
+                    let rect = convertVisionToScreen(normalizedBox: item.box, geoSize: geo.size)
+                    wordBox(item: item, rect: rect)
                 }
 
-                // 줌 표시기 + 버튼 + 캡처 버튼
+                // 하단 버튼
                 VStack {
                     Spacer()
-
                     HStack(spacing: 16) {
                         PhotosPicker(selection: $selectedPhoto, matching: .images) {
                             Image(systemName: "photo.on.rectangle")
@@ -100,20 +70,16 @@ struct OverlayReadingView: View {
                                 .clipShape(Circle())
                         }
 
-                        // 줌 표시기
                         Text(String(format: "%.1f×", cameraZoom))
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white)
-                            .frame(minWidth: 45)
-                            .frame(height: 32)
+                            .frame(minWidth: 45).frame(height: 32)
                             .background(Color.black.opacity(0.5))
                             .cornerRadius(8)
 
-                        // 리셋 줌 버튼
                         Button(action: {
                             withAnimation(.easeInOut(duration: 0.2)) {
-                                cameraZoom = 1.0
-                                lastCameraZoom = 1.0
+                                cameraZoom = 1.0; lastCameraZoom = 1.0
                                 viewModel.setZoom(1.0)
                             }
                         }) {
@@ -124,15 +90,6 @@ struct OverlayReadingView: View {
                                 .background(Color.blue.opacity(0.6))
                                 .cornerRadius(6)
                         }
-
-                        Button(action: { viewModel.captureSnapshot() }) {
-                            Circle()
-                                .fill(.white)
-                                .frame(width: 72, height: 72)
-                                .overlay(Circle().stroke(.gray, lineWidth: 3))
-                        }
-
-                        Color.clear.frame(width: 50, height: 50)
                     }
                     .padding(.bottom, 120)
                 }
@@ -145,9 +102,7 @@ struct OverlayReadingView: View {
                         cameraZoom = newZoom
                         viewModel.setZoom(newZoom)
                     }
-                    .onEnded { _ in
-                        lastCameraZoom = cameraZoom
-                    }
+                    .onEnded { _ in lastCameraZoom = cameraZoom }
             )
         }
         .ignoresSafeArea()
@@ -179,20 +134,7 @@ struct OverlayReadingView: View {
 
                     ForEach(viewModel.overlayItems) { item in
                         let rect = convertToScreen(normalizedBox: item.box, displayRect: displayRect)
-
-                        Rectangle()
-                            .fill(Color.white.opacity(0.5))
-                            .frame(width: rect.width, height: rect.height)
-                            .position(x: rect.midX, y: rect.midY)
-
-                        Text(item.reading)
-                            .font(.system(size: max(rect.height * 0.6, 9)))
-                            .foregroundStyle(.red)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                            .frame(width: rect.width, height: rect.height)
-                            .position(x: rect.midX, y: rect.midY)
-                            .onTapGesture { selectedItem = item }
+                        wordBox(item: item, rect: rect)
                     }
                 }
                 .scaleEffect(zoomScale)
@@ -222,16 +164,13 @@ struct OverlayReadingView: View {
                     }
                 }
 
-                // 하단 버튼 + 줌 컨트롤
                 VStack {
                     Spacer()
-
                     HStack(spacing: 12) {
-                        // 취소 버튼 (아이콘만)
                         Button(action: {
                             viewModel.capturedImage = nil
                             viewModel.overlayItems = []
-                            mode = .camera
+                            viewModel.startLiveOCR()
                         }) {
                             Image(systemName: "xmark")
                                 .font(.system(size: 18, weight: .semibold))
@@ -241,22 +180,17 @@ struct OverlayReadingView: View {
                                 .cornerRadius(22)
                         }
 
-                        // 줌 레벨 표시
                         Text(String(format: "%.1f×", zoomScale))
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white)
-                            .frame(minWidth: 45)
-                            .frame(height: 32)
+                            .frame(minWidth: 45).frame(height: 32)
                             .background(Color.black.opacity(0.5))
                             .cornerRadius(8)
 
-                        // 리셋 줌 버튼
                         Button(action: {
                             withAnimation(.easeInOut(duration: 0.2)) {
-                                zoomScale = 1.0
-                                lastZoomScale = 1.0
-                                offset = .zero
-                                lastOffset = .zero
+                                zoomScale = 1.0; lastZoomScale = 1.0
+                                offset = .zero; lastOffset = .zero
                             }
                         }) {
                             Image(systemName: "arrow.down.left.and.arrow.up.right")
@@ -275,6 +209,46 @@ struct OverlayReadingView: View {
             }
         }
         .ignoresSafeArea()
+    }
+
+    // MARK: - 단어 박스 (공통)
+
+    @ViewBuilder
+    private func wordBox(item: OverlayItem, rect: CGRect) -> some View {
+        let isVisible = viewModel.visibleReading == item.id
+        let fontSize: CGFloat = 24
+
+        // 바운딩 박스
+        RoundedRectangle(cornerRadius: 3)
+            .stroke(Color.yellow.opacity(0.8), lineWidth: 1.5)
+            .frame(width: rect.width, height: rect.height)
+            .contentShape(Rectangle().size(CGSize(width: rect.width + 20, height: rect.height + 20)))
+            .position(x: rect.midX, y: rect.midY)
+            .onTapGesture { viewModel.toggleReading(for: item.id) }
+
+        // 독음 박스 (바운딩박스 위에 독립적으로 표시)
+        if isVisible {
+            HStack(spacing: 4) {
+                Text(item.reading)
+                    .font(.system(size: fontSize))
+                    .foregroundStyle(.black)
+                    .fixedSize()
+
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: fontSize * 0.7))
+                    .foregroundStyle(.white)
+                    .padding(2)
+                    .background(Color.blue.opacity(0.75))
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .onTapGesture { selectedItem = item }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Color.white.opacity(0.95))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .shadow(radius: 2)
+            .position(x: rect.midX, y: rect.minY - fontSize)
+        }
     }
 
     // MARK: - 좌표 변환
@@ -328,14 +302,13 @@ struct OverlayReadingView: View {
         let h = normalizedBox.height * displayRect.height
         return CGRect(x: x, y: y, width: w, height: h)
     }
-
 }
 
 // MARK: - 글자 상세 팝업
 
 struct CharDetailSheet: View {
     let item: OverlayItem
-    @StateObject private var viewModel = CharDetailViewModel(character: "")
+    @StateObject private var viewModel: CharDetailViewModel
 
     init(item: OverlayItem) {
         self.item = item
@@ -367,83 +340,53 @@ struct CharDetailSheet: View {
                     let wordResults = viewModel.results.filter { $0.category == "한자어" }
                     if !wordResults.isEmpty {
                         Section {
-                            ForEach(wordResults, id: \.term) { result in
-                                resultRow(result)
-                            }
+                            ForEach(wordResults, id: \.term) { result in resultRow(result) }
                         } header: {
-                            Text("한자어")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.indigo)
+                            Text("한자어").font(.caption).fontWeight(.semibold).foregroundStyle(.indigo)
                         }
                     }
 
                     let herbalResults = viewModel.results.filter { $0.category == "본초" }
                     if !herbalResults.isEmpty {
                         Section {
-                            ForEach(herbalResults, id: \.term) { result in
-                                resultRow(result)
-                            }
+                            ForEach(herbalResults, id: \.term) { result in resultRow(result) }
                         } header: {
-                            Text("본초 (약재)")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.blue)
+                            Text("본초 (약재)").font(.caption).fontWeight(.semibold).foregroundStyle(.blue)
                         }
                     }
 
                     let formulaResults = viewModel.results.filter { $0.category == "방제" }
                     if !formulaResults.isEmpty {
                         Section {
-                            ForEach(formulaResults, id: \.term) { result in
-                                resultRow(result)
-                            }
+                            ForEach(formulaResults, id: \.term) { result in resultRow(result) }
                         } header: {
-                            Text("방제 (처방)")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.purple)
+                            Text("방제 (처방)").font(.caption).fontWeight(.semibold).foregroundStyle(.purple)
                         }
                     }
 
                     let acupointResults = viewModel.results.filter { $0.category == "경혈" }
                     if !acupointResults.isEmpty {
                         Section {
-                            ForEach(acupointResults, id: \.term) { result in
-                                resultRow(result)
-                            }
+                            ForEach(acupointResults, id: \.term) { result in resultRow(result) }
                         } header: {
-                            Text("경혈 (침구)")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.teal)
+                            Text("경혈 (침구)").font(.caption).fontWeight(.semibold).foregroundStyle(.teal)
                         }
                     }
 
                     let diseaseResults = viewModel.results.filter { $0.category == "병명" }
                     if !diseaseResults.isEmpty {
                         Section {
-                            ForEach(diseaseResults, id: \.term) { result in
-                                resultRow(result)
-                            }
+                            ForEach(diseaseResults, id: \.term) { result in resultRow(result) }
                         } header: {
-                            Text("병명 (질병)")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.orange)
+                            Text("병명 (질병)").font(.caption).fontWeight(.semibold).foregroundStyle(.orange)
                         }
                     }
 
                     if !item.definition.isEmpty {
                         Section {
-                            Text(item.definition)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                            Text(item.definition).font(.callout).foregroundStyle(.secondary)
                         } header: {
-                            Text("글자 정보")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.gray)
+                            Text("글자 정보").font(.caption).fontWeight(.semibold).foregroundStyle(.gray)
                         }
                     }
                 }
@@ -456,17 +399,10 @@ struct CharDetailSheet: View {
     private func resultRow(_ result: DBResult) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text(result.term)
-                    .font(.headline)
-                    .foregroundStyle(.black)
-                Text(result.reading)
-                    .font(.subheadline)
-                    .foregroundStyle(.red)
+                Text(result.term).font(.headline).foregroundStyle(.black)
+                Text(result.reading).font(.subheadline).foregroundStyle(.red)
             }
-            Text(result.description)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
+            Text(result.description).font(.caption).foregroundStyle(.secondary).lineLimit(3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -531,6 +467,7 @@ struct OverlayItem: Identifiable {
 @MainActor
 class OverlayViewModel: NSObject, ObservableObject {
     @Published var overlayItems: [OverlayItem] = []
+    @Published var visibleReading: UUID? = nil
     @Published var capturedImage: UIImage?
     @Published var isProcessing = false
     @Published var cameraFrameAspect: CGFloat = 3.0 / 4.0
@@ -539,17 +476,45 @@ class OverlayViewModel: NSObject, ObservableObject {
     private var device: AVCaptureDevice?
     private let db = DictionaryDB.shared
 
-    // MARK: - 실시간 OCR (비디오 프레임 캡처 방식)
-
     private let videoOutput = AVCaptureVideoDataOutput()
     private let processingQueue = DispatchQueue(label: "ocr.processing")
     private var liveOCRActive = false
     private var isOCRProcessing = false
     private var frameSize: CGSize = CGSize(width: 1080, height: 1920)
     private var lastFrameImage: UIImage?
+    private var readingTimer: Task<Void, Never>? = nil
+
+    func dismissReading() {
+        visibleReading = nil
+        readingTimer?.cancel()
+        readingTimer = nil
+    }
+
+    func toggleReading(for id: UUID) {
+        if visibleReading == id {
+            // 수동 off: 즉시 숨김 + 타이머 취소
+            visibleReading = nil
+            readingTimer?.cancel()
+            readingTimer = nil
+        } else {
+            // on: 이전 타이머 취소 후 새 단어 표시 + 20초 타이머
+            readingTimer?.cancel()
+            visibleReading = id
+            readingTimer = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(20))
+                guard !Task.isCancelled else { return }
+                self?.visibleReading = nil
+                self?.readingTimer = nil
+            }
+        }
+    }
 
     func startLiveOCR() {
         liveOCRActive = true
+        capturedImage = nil
+        visibleReading = nil
+        readingTimer?.cancel()
+        readingTimer = nil
 
         if session.inputs.isEmpty {
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
@@ -563,7 +528,6 @@ class OverlayViewModel: NSObject, ObservableObject {
             if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
             session.commitConfiguration()
         } else {
-            // Ensure delegate is set if session was already configured
             videoOutput.setSampleBufferDelegate(self, queue: processingQueue)
         }
 
@@ -573,7 +537,7 @@ class OverlayViewModel: NSObject, ObservableObject {
 
     func stopLiveOCR() {
         liveOCRActive = false
-        isOCRProcessing = true  // 현재 진행 중인 OCR도 중지
+        isOCRProcessing = true
         DispatchQueue.global(qos: .userInitiated).async { self.session.stopRunning() }
     }
 
@@ -581,7 +545,6 @@ class OverlayViewModel: NSObject, ObservableObject {
         guard let connection = videoOutput.connection(with: .video) else { return }
         let orientation = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }.first?.interfaceOrientation ?? .portrait
-        // Use same angles as CameraView for consistency
         let angle: CGFloat = switch orientation {
         case .landscapeRight: 180.0
         case .landscapeLeft: 0.0
@@ -590,15 +553,6 @@ class OverlayViewModel: NSObject, ObservableObject {
         }
         if connection.isVideoRotationAngleSupported(angle) {
             connection.videoRotationAngle = angle
-        }
-    }
-
-    func captureSnapshot() {
-        stopLiveOCR()
-        updateVideoOutputRotation()
-        if let image = lastFrameImage {
-            // Re-run OCR on captured frame with preprocessing for better accuracy
-            processImage(image)
         }
     }
 
@@ -612,10 +566,14 @@ class OverlayViewModel: NSObject, ObservableObject {
         } catch {}
     }
 
-    // MARK: - 정적 이미지 처리
+    // MARK: - 정적 이미지 처리 (갤러리)
 
     func processImage(_ image: UIImage) {
+        stopLiveOCR()
         isProcessing = true
+        visibleReading = nil
+        readingTimer?.cancel()
+        readingTimer = nil
         let normalized = normalizeOrientation(image)
         guard let cgImage = normalized.cgImage else {
             isProcessing = false
@@ -633,15 +591,11 @@ class OverlayViewModel: NSObject, ObservableObject {
     private func normalizeOrientation(_ image: UIImage) -> UIImage {
         guard image.imageOrientation != .up else { return image }
 
-        // For .left and .right orientations (landscape), swap dimensions
         let contextSize: CGSize
         let drawRect: CGRect
 
         switch image.imageOrientation {
-        case .right:
-            contextSize = CGSize(width: image.size.height, height: image.size.width)
-            drawRect = CGRect(x: 0, y: 0, width: image.size.height, height: image.size.width)
-        case .left:
+        case .right, .left:
             contextSize = CGSize(width: image.size.height, height: image.size.width)
             drawRect = CGRect(x: 0, y: 0, width: image.size.height, height: image.size.width)
         default:
@@ -656,75 +610,12 @@ class OverlayViewModel: NSObject, ObservableObject {
         return normalized
     }
 
-    func reset() {
-        capturedImage = nil
-        overlayItems = []
-    }
-
-    /// 탭한 아이템의 bbox를 중국어 OCR로 재인식하여 정확도 향상
-    func refineItem(_ item: OverlayItem, completion: @escaping (OverlayItem) -> Void) {
-        guard let cgImage = lastFrameImage?.cgImage ?? capturedImage?.cgImage else {
-            completion(item)
-            return
-        }
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { completion(item); return }
-
-            let padX: CGFloat = 0.01
-            let padY: CGFloat = 0.005
-            let roi = CGRect(
-                x: max(0, item.box.minX - padX),
-                y: max(0, item.box.minY - padY),
-                width: min(1 - max(0, item.box.minX - padX), item.box.width + padX * 2),
-                height: min(1 - max(0, item.box.minY - padY), item.box.height + padY * 2)
-            )
-
-            let request = VNRecognizeTextRequest()
-            request.recognitionLevel = .accurate
-            request.recognitionLanguages = ["zh-Hant", "zh-Hans"]
-            request.usesLanguageCorrection = false
-            request.regionOfInterest = roi
-
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-            try? handler.perform([request])
-
-            if let zhText = request.results?.first?.topCandidates(1).first?.string {
-                let hanja = zhText.filter { ch in
-                    let v = ch.unicodeScalars.first?.value ?? 0
-                    return (v >= 0x4E00 && v <= 0x9FFF) || (v >= 0x3400 && v <= 0x4DBF) || (v >= 0xF900 && v <= 0xFAFF)
-                }
-                if !hanja.isEmpty {
-                    var reading = ""
-                    var definitions: [String] = []
-                    for ch in hanja {
-                        let r = self.db.readingForChar(String(ch)) ?? "?"
-                        reading += r
-                        if let def = self.db.definitionForChar(String(ch)) {
-                            definitions.append("\(ch)(\(r)): \(def)")
-                        }
-                    }
-                    let refined = OverlayItem(
-                        character: hanja,
-                        reading: reading,
-                        definition: definitions.joined(separator: "\n"),
-                        box: item.box
-                    )
-                    Task { @MainActor in completion(refined) }
-                    return
-                }
-            }
-            Task { @MainActor in completion(item) }
-        }
-    }
-
-    // MARK: - OCR 처리
+    // MARK: - OCR
 
     private func performOCR(on cgImage: CGImage, usePreprocessing: Bool = false, completion: @escaping ([OverlayItem]) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { completion([]); return }
 
-            // Apply preprocessing only for static captures (not live frames)
             let processedImage = usePreprocessing
                 ? ImagePreprocessor.preprocess(cgImage) ?? cgImage
                 : cgImage
@@ -737,15 +628,11 @@ class OverlayViewModel: NSObject, ObservableObject {
             let handler = VNImageRequestHandler(cgImage: processedImage, options: [:])
             try? handler.perform([request])
 
-            guard let observations = request.results else {
-                completion([])
-                return
-            }
+            guard let observations = request.results else { completion([]); return }
             let items = self.buildOverlayItemsFromObservations(observations)
             completion(items)
         }
     }
-
 
     nonisolated private func buildOverlayItemsFromObservations(_ observations: [VNRecognizedTextObservation]) -> [OverlayItem] {
         var items: [OverlayItem] = []
@@ -804,7 +691,6 @@ class OverlayViewModel: NSObject, ObservableObject {
         }
         return items
     }
-
 }
 
 // MARK: - 비디오 프레임 → OCR
@@ -812,7 +698,8 @@ class OverlayViewModel: NSObject, ObservableObject {
 extension OverlayViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
     nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         Task { @MainActor in
-            guard liveOCRActive, !isOCRProcessing else { return }
+            // 독음이 하나라도 표시 중이면 재스캔 안 함
+            guard liveOCRActive, !isOCRProcessing, visibleReading == nil else { return }
             isOCRProcessing = true
 
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
@@ -820,14 +707,11 @@ extension OverlayViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                 return
             }
 
-            // 실제 프레임 크기 저장 (rotation 적용 후이므로 width < height)
             let w = CVPixelBufferGetWidth(pixelBuffer)
             let h = CVPixelBufferGetHeight(pixelBuffer)
             frameSize = CGSize(width: w, height: h)
             let aspect = CGFloat(w) / CGFloat(h)
-            if self.cameraFrameAspect != aspect {
-                self.cameraFrameAspect = aspect
-            }
+            if self.cameraFrameAspect != aspect { self.cameraFrameAspect = aspect }
 
             let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
             let context = CIContext()
@@ -836,7 +720,6 @@ extension OverlayViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                 return
             }
 
-            // 마지막 프레임 저장
             lastFrameImage = UIImage(cgImage: cgImage)
 
             let request = VNRecognizeTextRequest { [weak self] request, _ in
@@ -845,11 +728,9 @@ extension OverlayViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                     self?.isOCRProcessing = false
                     return
                 }
-                // 실시간은 1-pass (한국어+중국어 동시) — 성능 우선
                 let items = self.buildOverlayItemsFromObservations(observations)
                 Task { @MainActor in
                     self.overlayItems = items
-                    try? await Task.sleep(for: .seconds(3))
                     self.isOCRProcessing = false
                 }
             }
