@@ -47,6 +47,9 @@ struct OverlayReadingView: View {
         GeometryReader { geo in
             ZStack {
                 LiveCameraPreview(session: viewModel.session)
+                    .onTapGesture {
+                        viewModel.dismissReading()
+                    }
 
                 // 실시간 오버레이 — 바운딩 박스 + 탭 토글 독음 + 사전 아이콘
                 ForEach(viewModel.overlayItems) { item in
@@ -212,43 +215,39 @@ struct OverlayReadingView: View {
 
     @ViewBuilder
     private func wordBox(item: OverlayItem, rect: CGRect) -> some View {
-        let isVisible = viewModel.visibleReadings.contains(item.id)
-        let fontSize = max(rect.height * 0.55, 9)
+        let isVisible = viewModel.visibleReading == item.id
+        let fontSize: CGFloat = 24
 
-        ZStack(alignment: .topTrailing) {
-            // 바운딩 박스
-            RoundedRectangle(cornerRadius: 3)
-                .stroke(Color.yellow.opacity(0.8), lineWidth: 1.5)
-                .frame(width: rect.width, height: rect.height)
+        // 바운딩 박스
+        RoundedRectangle(cornerRadius: 3)
+            .stroke(Color.yellow.opacity(0.8), lineWidth: 1.5)
+            .frame(width: rect.width, height: rect.height)
+            .contentShape(Rectangle().size(CGSize(width: rect.width + 20, height: rect.height + 20)))
+            .position(x: rect.midX, y: rect.midY)
+            .onTapGesture { viewModel.toggleReading(for: item.id) }
 
-            // 독음 + 사전 아이콘 (토글 시에만)
-            if isVisible {
-                HStack(spacing: 2) {
-                    Text(item.reading)
-                        .font(.system(size: fontSize))
-                        .foregroundStyle(.black)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.4)
+        // 독음 박스 (바운딩박스 위에 독립적으로 표시)
+        if isVisible {
+            HStack(spacing: 4) {
+                Text(item.reading)
+                    .font(.system(size: fontSize))
+                    .foregroundStyle(.black)
+                    .fixedSize()
 
-                    Image(systemName: "book.closed.fill")
-                        .font(.system(size: min(fontSize * 0.8, 11)))
-                        .foregroundStyle(.white)
-                        .padding(2)
-                        .background(Color.blue.opacity(0.75))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                        .onTapGesture { selectedItem = item }
-                }
-                .padding(.horizontal, 4)
-                .frame(height: rect.height)
-                .background(Color.white.opacity(0.92))
-                .clipShape(RoundedRectangle(cornerRadius: 3))
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: fontSize * 0.7))
+                    .foregroundStyle(.white)
+                    .padding(2)
+                    .background(Color.blue.opacity(0.75))
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .onTapGesture { selectedItem = item }
             }
-        }
-        .frame(width: rect.width, height: rect.height)
-        .contentShape(Rectangle())
-        .position(x: rect.midX, y: rect.midY)
-        .onTapGesture {
-            viewModel.toggleReading(for: item.id)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Color.white.opacity(0.95))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .shadow(radius: 2)
+            .position(x: rect.midX, y: rect.minY - fontSize)
         }
     }
 
@@ -468,7 +467,7 @@ struct OverlayItem: Identifiable {
 @MainActor
 class OverlayViewModel: NSObject, ObservableObject {
     @Published var overlayItems: [OverlayItem] = []
-    @Published var visibleReadings: Set<UUID> = []
+    @Published var visibleReading: UUID? = nil
     @Published var capturedImage: UIImage?
     @Published var isProcessing = false
     @Published var cameraFrameAspect: CGFloat = 3.0 / 4.0
@@ -483,23 +482,29 @@ class OverlayViewModel: NSObject, ObservableObject {
     private var isOCRProcessing = false
     private var frameSize: CGSize = CGSize(width: 1080, height: 1920)
     private var lastFrameImage: UIImage?
-    private var readingTimers: [UUID: Task<Void, Never>] = [:]
+    private var readingTimer: Task<Void, Never>? = nil
+
+    func dismissReading() {
+        visibleReading = nil
+        readingTimer?.cancel()
+        readingTimer = nil
+    }
 
     func toggleReading(for id: UUID) {
-        if visibleReadings.contains(id) {
+        if visibleReading == id {
             // 수동 off: 즉시 숨김 + 타이머 취소
-            visibleReadings.remove(id)
-            readingTimers[id]?.cancel()
-            readingTimers[id] = nil
+            visibleReading = nil
+            readingTimer?.cancel()
+            readingTimer = nil
         } else {
-            // on: 독음 표시 + 20초 자동 숨김 타이머
-            visibleReadings.insert(id)
-            readingTimers[id]?.cancel()
-            readingTimers[id] = Task { @MainActor [weak self] in
+            // on: 이전 타이머 취소 후 새 단어 표시 + 20초 타이머
+            readingTimer?.cancel()
+            visibleReading = id
+            readingTimer = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(20))
                 guard !Task.isCancelled else { return }
-                self?.visibleReadings.remove(id)
-                self?.readingTimers[id] = nil
+                self?.visibleReading = nil
+                self?.readingTimer = nil
             }
         }
     }
@@ -507,9 +512,9 @@ class OverlayViewModel: NSObject, ObservableObject {
     func startLiveOCR() {
         liveOCRActive = true
         capturedImage = nil
-        visibleReadings = []
-        readingTimers.values.forEach { $0.cancel() }
-        readingTimers = [:]
+        visibleReading = nil
+        readingTimer?.cancel()
+        readingTimer = nil
 
         if session.inputs.isEmpty {
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
@@ -566,7 +571,9 @@ class OverlayViewModel: NSObject, ObservableObject {
     func processImage(_ image: UIImage) {
         stopLiveOCR()
         isProcessing = true
-        visibleReadings = []
+        visibleReading = nil
+        readingTimer?.cancel()
+        readingTimer = nil
         let normalized = normalizeOrientation(image)
         guard let cgImage = normalized.cgImage else {
             isProcessing = false
@@ -692,7 +699,7 @@ extension OverlayViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
     nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         Task { @MainActor in
             // 독음이 하나라도 표시 중이면 재스캔 안 함
-            guard liveOCRActive, !isOCRProcessing, visibleReadings.isEmpty else { return }
+            guard liveOCRActive, !isOCRProcessing, visibleReading == nil else { return }
             isOCRProcessing = true
 
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
