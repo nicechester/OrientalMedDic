@@ -6,6 +6,7 @@ import AVFoundation
 
 struct OverlayReadingView: View {
     @StateObject private var viewModel = OverlayViewModel()
+    @ObservedObject private var settings = AppSettings.shared
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedItem: OverlayItem?
 
@@ -88,6 +89,16 @@ struct OverlayReadingView: View {
                                 .foregroundStyle(.white)
                                 .frame(width: 32, height: 32)
                                 .background(Color.blue.opacity(0.6))
+                                .cornerRadius(6)
+                        }
+
+                        // 독음 모드 토글 (탭 / 자동)
+                        Button(action: toggleReadingMode) {
+                            Image(systemName: settings.readingMode == .auto ? "eye.fill" : "hand.tap")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                                .background(settings.readingMode == .auto ? Color.orange.opacity(0.8) : Color.blue.opacity(0.6))
                                 .cornerRadius(6)
                         }
                     }
@@ -213,9 +224,15 @@ struct OverlayReadingView: View {
 
     // MARK: - 단어 박스 (공통)
 
+    private func toggleReadingMode() {
+        settings.readingMode = settings.readingMode == .tap ? .auto : .tap
+        viewModel.dismissReading()
+    }
+
     @ViewBuilder
     private func wordBox(item: OverlayItem, rect: CGRect) -> some View {
-        let isVisible = viewModel.visibleReading == item.id
+        let isAuto = settings.readingMode == .auto
+        let isVisible = isAuto || viewModel.visibleReading == item.id
         let fontSize: CGFloat = 24
 
         // 바운딩 박스
@@ -224,7 +241,13 @@ struct OverlayReadingView: View {
             .frame(width: rect.width, height: rect.height)
             .contentShape(Rectangle().size(CGSize(width: rect.width + 20, height: rect.height + 20)))
             .position(x: rect.midX, y: rect.midY)
-            .onTapGesture { viewModel.toggleReading(for: item.id) }
+            .onTapGesture {
+                if isAuto {
+                    selectedItem = item
+                } else {
+                    viewModel.toggleReading(for: item.id)
+                }
+            }
 
         // 독음 박스 (바운딩박스 위에 독립적으로 표시)
         if isVisible {
@@ -483,6 +506,7 @@ class OverlayViewModel: NSObject, ObservableObject {
     private var frameSize: CGSize = CGSize(width: 1080, height: 1920)
     private var lastFrameImage: UIImage?
     private var readingTimer: Task<Void, Never>? = nil
+    private var lastAutoScanTime: Date? = nil
 
     func dismissReading() {
         visibleReading = nil
@@ -698,8 +722,17 @@ class OverlayViewModel: NSObject, ObservableObject {
 extension OverlayViewModel: AVCaptureVideoDataOutputSampleBufferDelegate {
     nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         Task { @MainActor in
-            // 독음이 하나라도 표시 중이면 재스캔 안 함
-            guard liveOCRActive, !isOCRProcessing, visibleReading == nil else { return }
+            // 탭 모드에서 독음이 표시 중이면 재스캔 안 함 (자동 모드는 항상 스캔)
+            let isAuto = AppSettings.shared.readingMode == .auto
+            guard liveOCRActive, !isOCRProcessing, isAuto || visibleReading == nil else { return }
+
+            // 설정된 간격(기본 5초)마다만 스캔 (탭/자동 모드 공통)
+            let now = Date()
+            if let last = lastAutoScanTime,
+               now.timeIntervalSince(last) < AppSettings.shared.autoScanInterval {
+                return
+            }
+            lastAutoScanTime = now
             isOCRProcessing = true
 
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
